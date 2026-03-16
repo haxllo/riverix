@@ -1,0 +1,325 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+
+    <title>UNIX Seventh Edition</title>
+
+    <link rel="stylesheet" href="/pub/style/style.css" type="text/css" media="screen, handheld" title="default">
+    <link rel="shortcut icon" href="/favicon.ico" type="image/vnd.microsoft.icon">
+    <link rel="stylesheet" href="/_werc/pub/style.css" type="text/css" media="screen" title="default">
+
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"> 
+
+
+
+    
+
+</head>
+<body>
+
+<div id="header">
+    <div class="superHeader">
+    <div class="left">
+      <a href="https://github.com/aap/">github</a> |
+      <a href="https://mastodon.sdf.org/@aap">mastodon</a> |
+      <a href="http://tx-0.net">TX-0</a> |
+      <a href="http://pdp-1.net">PDP-1</a> |
+      <a href="http://pdp-6.net">PDP-6/10</a> |
+      <a href="https://obsolescence.dev/pdp1.html">PiDP-1</a> |
+      <a href="https://editor.p5js.org/aap/sketches">p5.js</a> |
+    </div>
+
+    <div class="right">
+      <span class="doNotDisplay">Related sites:</span>
+      | <a href="/sitemap">site map</a>
+    </div>
+
+    </div>
+
+    <div class="midHeader">
+    <h1 class="headerTitle"><a href="/">squoze.net <span id="headerSubTitle"></span></a></h1>
+    </div>
+    
+    <div class="subHeader"><br></div>
+</div>
+
+    <div id="side-bar">
+        <div>
+<ul>
+<li><a href="/B/">&rsaquo; B/</a></li>
+<li><a href="/C/">&rsaquo; C/</a></li>
+<li><a href="/NB/">&rsaquo; NB/</a></li>
+<li><a href="/UNIX/" class="thisPage">&raquo;<i> UNIX/</i></a></li>
+<li><ul>
+<li><a href="/UNIX/32v/">&rsaquo; 32v/</a></li>
+<li><a href="/UNIX/V6_on_rl01">&rsaquo; V6 on rl01</a></li>
+<li><a href="/UNIX/bltj/">&rsaquo; bltj/</a></li>
+<li><a href="/UNIX/fs/">&rsaquo; fs/</a></li>
+<li><a href="/UNIX/restored/">&rsaquo; restored/</a></li>
+<li><a href="/UNIX/sysIII_pdp11/">&rsaquo; sysIII pdp11/</a></li>
+<li><a href="/UNIX/sysIII_vax/">&rsaquo; sysIII vax/</a></li>
+<li><a href="/UNIX/sysV_pdp11/">&rsaquo; sysV pdp11/</a></li>
+<li><a href="/UNIX/tools/">&rsaquo; tools/</a></li>
+<li><a href="/UNIX/v1man/">&rsaquo; v1man/</a></li>
+<li><a href="/UNIX/v2man/">&rsaquo; v2man/</a></li>
+<li><a href="/UNIX/v3man/">&rsaquo; v3man/</a></li>
+<li><a href="/UNIX/v4/">&rsaquo; v4/</a></li>
+<li><a href="/UNIX/v4man/">&rsaquo; v4man/</a></li>
+<li><a href="/UNIX/v5/">&rsaquo; v5/</a></li>
+<li><a href="/UNIX/v5man/">&rsaquo; v5man/</a></li>
+<li><a href="/UNIX/v6/">&rsaquo; v6/</a></li>
+<li><a href="/UNIX/v6man/">&rsaquo; v6man/</a></li>
+<li><a href="/UNIX/v7/" class="thisPage">&raquo;<i> v7/</i></a></li>
+<li><ul>
+<li><a href="/UNIX/v7/Installation" class="thisPage">&raquo;<i> Installation</i></a></li>
+<li><a href="/UNIX/v7/files/">&rsaquo; files/</a></li>
+</ul></li>
+<li><a href="/UNIX/v8/">&rsaquo; v8/</a></li>
+</ul></li>
+<li><a href="/ling/">&rsaquo; ling/</a></li>
+<li><a href="/math/">&rsaquo; math/</a></li>
+<li><a href="/misc/">&rsaquo; misc/</a></li>
+<li><a href="/plan_9/">&rsaquo; plan 9/</a></li>
+</ul>
+        </div>
+    </div>
+
+<div id="main-copy">
+
+
+<h1>UNIX Seventh Edition</h1>
+
+<p>You can get the distribution files from
+<a href="http://www.tuhs.org/Archive/Distributions/Research/Keith_Bostic_v7/">TUHS</a>
+or from <a href="http://squoze.net/UNIX/v7/files/">me</a>
+and use <a href="http://squoze.net/UNIX/v7/files/mkdisttap.pl">mkdisttap.pl</a>
+to create the distribution tape.
+To do this, <code>gunzip</code> the files and run <code>./mkdisttap.pl &gt;dist.tap</code> (<a href="http://squoze.net/UNIX/v7/files/dist.tap">pre-built</a>).</p>
+
+<p>You can get the documentation from <a href="http://9p.io/7thEdMan/bswv7.html">the (mirrored) labs</a>
+or from <a href="http://squoze.net/UNIX/v7/files/doc/">me</a> where I have conveniently
+split the PDFs into the single documents.</p>
+
+<p>You should at least read the <em>Setting Up UNIX</em> document (29_setup.pdf).</p>
+
+<h2>Installing the root file system</h2>
+
+<p>To install the root file system create an <code>install.ini</code>:</p>
+
+<pre><code>set cpu 11/45
+set cpu idle
+set rp0 rp06
+att rp0 disk0.hp
+att tm0 dist.tap
+b tm0
+</code></pre>
+
+<p>Run simh and install the root file system according to the instructions:</p>
+
+<pre><code>% pdp11 install.ini
+
+PDP-11 simulator V3.9-0
+Disabling XQ
+Overwrite last track? [N] 
+Boot
+: tm(0,3)
+file sys size: 5000
+file system: hp(0,0)
+isize = 1600            
+m/n = 3 500 
+Exit called
+Boot       
+: tm(0,4)
+Tape? tm(0,5)
+Disk? hp(0,0)
+Last chance before scribbling on disk. 
+End of tape                            
+Boot       
+:
+</code></pre>
+
+<h2>Booting UNIX</h2>
+
+<p>Still inside the boot prompt, boot UNIX from your new file system:</p>
+
+<pre><code>: hp(0,0)hptmunix
+mem = 177344     
+
+#
+</code></pre>
+
+<p>For now we're staying in single user mode, but we use <code>stty</code> to get some
+sane settings:</p>
+
+<pre><code># STTY -LCASE CR0
+</code></pre>
+
+<p>If you want, change erase (default <code>#</code>) and kill (default <code>@</code>)
+to whatever you like using <code>stty</code>, this is what I do:</p>
+
+<pre><code># stty erase &lt;press backspace&gt; kill &lt;press ^U&gt;
+</code></pre>
+
+<h2>Creating device files and extracting the rest of the tape</h2>
+
+<p>Now create the remaining device files:</p>
+
+<pre><code># cd /dev
+# make rp06
+/etc/mknod rp0 b 6 0
+/etc/mknod swap b 6 1
+/etc/mknod rp3 b 6 7
+/etc/mknod rrp0 c 14 0
+/etc/mknod rrp3 c 14 7
+chmod go-w rp0 swap rp3 rrp0 rrp3
+# make tm
+/etc/mknod mt0 b 3 0
+/etc/mknod rmt0 c 12 0
+/etc/mknod nrmt0 c 12 128
+chmod go+w mt0 rmt0 nrmt0
+#
+</code></pre>
+
+<p>Since we're using an RP06 drive, it might be a good idea to read hp(4).
+The disk is subdivided into eight partitions that we can use for our
+purposes.
+The minor number specifies the partition for which a device file stands.
+In our case, we're using p0 as /, p1 as swap and after the next step
+p7 as /usr. This way the partitions don't overlap.
+The size of p7 (rp3) is 771*418=322278 512-byte blocks,
+which we will now give to mkfs as an argument.</p>
+
+<pre><code># /etc/mkfs /dev/rp3 322278
+isize = 65496
+m/n = 3 500
+# dd if=/dev/nrmt0 of=/dev/null bs=20b files=6
+202+80 records in
+202+75 records out
+# restor rf /dev/nrmt0 /dev/rp3
+Last chance before scribbling on /dev/rp3. 
+End of tape
+#
+</code></pre>
+
+<p>To be able to boot UNIX from disk we have to copy the boot block,
+which is on our new partition, so we have to mount it first.
+After that we halt the system.</p>
+
+<pre><code># /etc/mount /dev/rp3 /usr
+# dd if=/usr/mdec/hpuboot of=/dev/rp0 count=1
+0+1 records in
+0+1 records out
+# sync
+# sync
+# sync
+# ^E
+Simulation stopped, PC: 002306 (MOV (SP)+,177776)
+sim&gt; q
+Goodbye
+</code></pre>
+
+<h2>Recompiling the Kernel and System Configuration</h2>
+
+<p>Create a <code>boot.ini</code>:</p>
+
+<pre><code>set cpu 11/45
+set cpu idle
+set rp0 rp06
+att rp0 disk0.hp
+set dci en
+set dci lines=8
+att dci 1107
+b rp0
+</code></pre>
+
+<p>And boot from it, type <code>EOF</code>/<code>^D</code> to get into multiuser mode
+and login as <code>root</code> (password <code>root</code>).</p>
+
+<pre><code>% pdp11 boot.ini
+
+PDP-11 simulator V3.9-0
+Disabling XQ
+boot
+Boot
+: hp(0,0)hptmunix
+mem = 177344     
+# RESTRICTED RIGHTS: USE, DUPLICATION, OR DISCLOSURE
+IS SUBJECT TO RESTRICTIONS STATED IN YOUR CONTRACT WITH
+WESTERN ELECTRIC COMPANY, INC.
+WED DEC 31 19:43:39 EST 1969
+
+login: root
+Password:
+You have mail.
+#
+</code></pre>
+
+<p>First rename <code>hptmunix</code> to <code>unix</code> and remove the unused kernels:</p>
+
+<pre><code># mv hptmunix unix
+# rm hphtunix rp*
+</code></pre>
+
+<p>The kernel configuration depends on the files
+<code>conf/l.s</code> and <code>conf/c.c</code> (in <code>/usr/sys</code>) or rather the object files.
+Since the clock is not set up correctly, make will not recompile them,
+so delete them before doing anything:</p>
+
+<pre><code># cd /usr/sys/conf
+# rm l.o c.o
+</code></pre>
+
+<p>Let's configure the kernel to support 4 DC11 lines (the default maximum)
+and create the necessary tty files:</p>
+
+<pre><code># cp hptmconf myconf
+# echo 4dc &gt;&gt;myconf
+# mkconf &lt;myconf
+console at 60
+clock at 100
+clock at 104
+parity at 114
+tm at 224
+hp at 254
+dc at 300
+dc at 310
+dc at 320
+dc at 330
+# make
+as - -o l.o l.s
+as -o mch.o mch0.s mch.s
+cc  -c c.c
+ld -o unix -X -i l.o mch.o c.o ../sys/LIB1 ../dev/LIB2
+# mv unix /myunix
+# ed /etc/ttys
+266
+2,5s/./1/
+w
+266
+q
+# /etc/mknod /dev/tty00 c 3 0
+# /etc/mknod /dev/tty01 c 3 1
+# /etc/mknod /dev/tty02 c 3 2
+# /etc/mknod /dev/tty03 c 3 3
+</code></pre>
+
+<p>Now reboot the <code>myunix</code> kernel and you'll be able to connect to your UNIX
+system with <code>telnet localhost 1107</code>.
+If you're sure the kernel is working,
+you can delete the old one and rename the new kernel <code>unix</code>.</p>
+
+<p>That's all for now, have fun.</p>
+
+
+</div>
+
+<div id="footer">
+<div class="left"><a href="http://werc.cat-v.org/">Powered by werc</a></div>
+<!-- TODO Maybe should add a programatically generated google search box -->
+<div class="right"><a href="/_users/login">User Login</a></div>
+
+<br>
+<br class="doNotDisplay doNotPrint">
+</div>
+</body></html>

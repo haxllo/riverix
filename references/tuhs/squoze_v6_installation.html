@@ -1,0 +1,459 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+
+    <title>UNIX Sixth Edition</title>
+
+    <link rel="stylesheet" href="/pub/style/style.css" type="text/css" media="screen, handheld" title="default">
+    <link rel="shortcut icon" href="/favicon.ico" type="image/vnd.microsoft.icon">
+    <link rel="stylesheet" href="/_werc/pub/style.css" type="text/css" media="screen" title="default">
+
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"> 
+
+
+
+    
+
+</head>
+<body>
+
+<div id="header">
+    <div class="superHeader">
+    <div class="left">
+      <a href="https://github.com/aap/">github</a> |
+      <a href="https://mastodon.sdf.org/@aap">mastodon</a> |
+      <a href="http://tx-0.net">TX-0</a> |
+      <a href="http://pdp-1.net">PDP-1</a> |
+      <a href="http://pdp-6.net">PDP-6/10</a> |
+      <a href="https://obsolescence.dev/pdp1.html">PiDP-1</a> |
+      <a href="https://editor.p5js.org/aap/sketches">p5.js</a> |
+    </div>
+
+    <div class="right">
+      <span class="doNotDisplay">Related sites:</span>
+      | <a href="/sitemap">site map</a>
+    </div>
+
+    </div>
+
+    <div class="midHeader">
+    <h1 class="headerTitle"><a href="/">squoze.net <span id="headerSubTitle"></span></a></h1>
+    </div>
+    
+    <div class="subHeader"><br></div>
+</div>
+
+    <div id="side-bar">
+        <div>
+<ul>
+<li><a href="/B/">&rsaquo; B/</a></li>
+<li><a href="/C/">&rsaquo; C/</a></li>
+<li><a href="/NB/">&rsaquo; NB/</a></li>
+<li><a href="/UNIX/" class="thisPage">&raquo;<i> UNIX/</i></a></li>
+<li><ul>
+<li><a href="/UNIX/32v/">&rsaquo; 32v/</a></li>
+<li><a href="/UNIX/V6_on_rl01">&rsaquo; V6 on rl01</a></li>
+<li><a href="/UNIX/bltj/">&rsaquo; bltj/</a></li>
+<li><a href="/UNIX/fs/">&rsaquo; fs/</a></li>
+<li><a href="/UNIX/restored/">&rsaquo; restored/</a></li>
+<li><a href="/UNIX/sysIII_pdp11/">&rsaquo; sysIII pdp11/</a></li>
+<li><a href="/UNIX/sysIII_vax/">&rsaquo; sysIII vax/</a></li>
+<li><a href="/UNIX/sysV_pdp11/">&rsaquo; sysV pdp11/</a></li>
+<li><a href="/UNIX/tools/">&rsaquo; tools/</a></li>
+<li><a href="/UNIX/v1man/">&rsaquo; v1man/</a></li>
+<li><a href="/UNIX/v2man/">&rsaquo; v2man/</a></li>
+<li><a href="/UNIX/v3man/">&rsaquo; v3man/</a></li>
+<li><a href="/UNIX/v4/">&rsaquo; v4/</a></li>
+<li><a href="/UNIX/v4man/">&rsaquo; v4man/</a></li>
+<li><a href="/UNIX/v5/">&rsaquo; v5/</a></li>
+<li><a href="/UNIX/v5man/">&rsaquo; v5man/</a></li>
+<li><a href="/UNIX/v6/" class="thisPage">&raquo;<i> v6/</i></a></li>
+<li><ul>
+<li><a href="/UNIX/v6/build/">&rsaquo; build/</a></li>
+<li><a href="/UNIX/v6/files/">&rsaquo; files/</a></li>
+<li><a href="/UNIX/v6/installation" class="thisPage">&raquo;<i> installation</i></a></li>
+</ul></li>
+<li><a href="/UNIX/v6man/">&rsaquo; v6man/</a></li>
+<li><a href="/UNIX/v7/">&rsaquo; v7/</a></li>
+<li><a href="/UNIX/v8/">&rsaquo; v8/</a></li>
+</ul></li>
+<li><a href="/ling/">&rsaquo; ling/</a></li>
+<li><a href="/math/">&rsaquo; math/</a></li>
+<li><a href="/misc/">&rsaquo; misc/</a></li>
+<li><a href="/plan_9/">&rsaquo; plan 9/</a></li>
+</ul>
+        </div>
+    </div>
+
+<div id="main-copy">
+
+
+<h1>UNIX Sixth Edition</h1>
+
+<p>This is a guide to installing UNIX sixth edition in the simh PDP-11 emulator.
+Besides the PDP-11 emulator you only need the v6 distribution tape,
+which you can get from
+<a href="http://doc.cat-v.org/unix/v6/operating-systems-lecture-notes/v6/dist.tap">http://doc.cat-v.org/unix/v6/operating-systems-lecture-notes/v6/dist.tap</a>
+or <a href="http://squoze.net/UNIX/v6/files/dist.tap">my site</a>.</p>
+
+<p>You should also read some of the documents that come with UNIX.
+You can get most of them (and the UNIX Programmer's Manual)
+as Postscript files here:
+<a href="http://doc.cat-v.org/unix/v6/operating-systems-lecture-notes/v6/doc/index.html">http://doc.cat-v.org/unix/v6/operating-systems-lecture-notes/v6/doc/index.html</a>
+or from <a href="http://squoze.net/UNIX/v6/files/doc/">my site</a> (also as PDF).
+The Programmer's Manual without the documents is also available
+<a href="../v6man">here</a>.</p>
+
+<p>The UPM for v6 (among others) is also available
+<a href="http://man.cat-v.org/unix-6th/">here</a>.</p>
+
+<p>Particularly relevant is the <em>Setting up UNIX</em> document (start.ps/pdf).</p>
+
+<p>Note: If you don't want to install UNIX yourself,
+you can grab the pre-installed RK05 images
+and the expect script that was used to build them
+<a href="build">here</a>.</p>
+
+<h2>Installing the root file system</h2>
+
+<p>There are three RK05 disk images on the tape:</p>
+
+<ul>
+<li>/</li>
+<li>/usr/source</li>
+<li>/usr/doc</li>
+</ul>
+
+<p>To install the root file system create an <code>install.ini</code>
+with the following lines:</p>
+
+<pre><code>set cpu 11/40
+set tm0 locked
+att tm0 path/to/your/dist.tape
+att rk0 disk0.rk
+att rk1 disk1.rk
+att rk2 disk2.rk
+d 100000 012700
+d 100002 172526
+d 100004 010040
+d 100006 012740
+d 100010 060003
+d 100012 000777
+g 100000
+g 0
+</code></pre>
+
+<p>This tells the emulator to emulate a PDP-11/40,
+attaches the distribution tape and three disks,
+and then executes the bootstrap.</p>
+
+<p>To run, type <code>pdp11 install.ini</code>,
+press ^E to stop the emulator. It will start again at 0.
+Now copy the boot sector and root fs from tape to RK0:</p>
+
+<pre><code>=tmrk
+disk offset
+0
+tape offset
+100
+count
+1
+=tmrk
+disk offset
+1
+tape offset
+101
+count
+3999
+=
+</code></pre>
+
+<p>and stop with ^E. We will copy the rest to disk when we are running UNIX.</p>
+
+<h2>Booting UNIX</h2>
+
+<p>To boot UNIX, boot from RK0 and load the kernel <code>rkunix</code>. Login as <code>root</code>.</p>
+
+<pre><code>sim&gt; boot rk0
+@rkunix
+
+login: root
+#
+</code></pre>
+
+<p>Welcome to UNIX.</p>
+
+<p>A quick introduction:
+To erase one character type <code>#</code>, to kill the whole line type <code>@</code>.
+To interrupt a program type <code>DEL</code>/<code>^?</code>
+(usually on Delete or Backspace key, depends on terminal).
+If you want to change that, use stty:</p>
+
+<pre><code># stty erase &lt;key to erase character&gt; kill &lt;key to kill line&gt;
+</code></pre>
+
+<p>A good standard are <code>^H</code> (Backspace) and <code>^U</code>.</p>
+
+<p>The terminal is configured with option <em>cr1</em> by default which delays output
+after a newline, set it to <em>cr0</em> to get faster output:</p>
+
+<pre><code># stty cr0
+</code></pre>
+
+<p><code>cd</code> is still called <code>chdir</code> in v6
+(edit <code>/usr/source/s1/sh.c</code> later if you want to change that).</p>
+
+<h2>Creating device files</h2>
+
+<p>To restore the other RK disks we have to create the correct device files.
+<code>/etc/mknod</code> without arguments tells you what arguments it expects:</p>
+
+<pre><code>usage: mknod name b/c major minor
+</code></pre>
+
+<p>We create a block- and character-device for each of the three disks
+(major number 0 and 9 resp.):</p>
+
+<pre><code># /etc/mknod /dev/rk0 b 0 0
+# /etc/mknod /dev/rk1 b 0 1
+# /etc/mknod /dev/rk2 b 0 2
+# /etc/mknod /dev/rrk0 c 9 0
+# /etc/mknod /dev/rrk1 c 9 1
+# /etc/mknod /dev/rrk2 c 9 2
+</code></pre>
+
+<p>We also need a tape device (major number 3/12):</p>
+
+<pre><code># /etc/mknod /dev/mt0 b 3 0
+# /etc/mknod /dev/rmt0 c 12 0
+</code></pre>
+
+<h2>Copy disks and mount them</h2>
+
+<p>Finally we can copy the source and doc disks from tape:</p>
+
+<pre><code># dd if=/dev/mt0 of=/dev/rk1 count=4000 skip=4100
+# dd if=/dev/mt0 of=/dev/rk2 count=4000 skip=8100
+</code></pre>
+
+<p>You can now mount them to /usr/source and /usr/doc (needs to be created):</p>
+
+<pre><code># /etc/mount /dev/rk1 /usr/source
+# mkdir /usr/doc
+# /etc/mount /dev/rk2 /usr/doc
+</code></pre>
+
+<p>If you want the disks to be mounted at startup, edit <code>/etc/rc</code>:</p>
+
+<pre><code># ed /etc/rc
+28
+2
+/etc/update
+a
+/etc/mount /dev/rk1 /usr/source
+/etc/mount /dev/rk2 /usr/doc
+.
+w
+89
+q
+#
+</code></pre>
+
+<p>This completes the basic installation.
+To halt the system type <code>sync</code> a couple of times, stop and quit the emulator:</p>
+
+<pre><code># sync
+# sync
+# sync
+# ^E
+Simulation stopped, PC: 002502 (MOV (SP)+,177776)
+sim&gt; q
+Goodbye
+</code></pre>
+
+<h2>Recompiling the Kernel and System Configuration</h2>
+
+<p>After the installation there is still some stuff to do.
+We will compile a new kernel with additional support for 8 terminal lines,
+a papertape device and a line printer.</p>
+
+<p>Create a <code>boot.ini</code> that will be used to boot the system:</p>
+
+<pre><code>set cpu 11/40
+att rk0 disk0.rk
+att rk1 disk1.rk
+att rk2 disk2.rk
+; att tm0 scratch.tape
+; att lpt printer.txt
+; att ptp paperout
+; att ptr paperin
+set dci en
+set dci lines=8
+att dci 1106
+d sr 1
+b rk
+</code></pre>
+
+<p>This will create 8 terminal lines you can attach to with telnet over port 1106.
+Uncomment the lines to attach tape, printer and papertape output/input files.
+If the switch register is set to zero, the kernel will not print anything,
+Setting it to 1 will enable kernel printing.</p>
+
+<p>Boot <code>rkunix</code> again:</p>
+
+<pre><code>% pdp11 boot.ini
+
+PDP-11 simulator V3.9-0
+Disabling XQ
+Listening on port 1106 (socket 9)
+@rkunix
+mem = 1035
+RESTRICTED RIGHTS
+
+Use, duplication or disclosure is subject to
+restrictions stated in Contract with Western
+Electric Company, Inc.                      
+
+login: root
+#
+</code></pre>
+
+<p>Now we will delete the unneeded kernels and build our own:</p>
+
+<pre><code># rm hpunix rpunix unix
+# chdir /usr/sys/conf
+# cc mkconf.c
+# mv a.out mkconf
+# cat &gt;myconf
+rk
+tm
+pc
+8dc
+lp
+^D
+# mkconf &lt;myconf
+# as m40.s
+# mv a.out m40.o
+# cc -c c.c
+# as l.s
+# mv a.out l.o
+# ld -x l.o m40.o c.o ../lib1 ../lib2
+# mv a.out /unix
+</code></pre>
+
+<p>If you want, you can write a shell script that does this for you,
+look at or modify <code>/usr/sys/run</code>.
+Now halt and boot kernel <code>unix</code>, we can now also delete <code>rkunix</code>.</p>
+
+<pre><code># sync
+# sync
+# sync
+# ^E
+Simulation stopped, PC: 002656 (MOV (SP)+,177776)
+sim&gt; b rk0
+@unix
+mem = 1027
+RESTRICTED RIGHTS
+
+Use, duplication or disclosure is subject to
+restrictions stated in Contract with Western
+Electric Company, Inc.                      
+
+login: root
+# rm rkunix
+</code></pre>
+
+<p>Now we will create the necessary device files again,
+for that we consult <code>/usr/sys/conf/c.c</code>. The first table
+is for block devices, the second for character devices.
+The major number for <code>/etc/mknod</code> is the index into the corresponding table.</p>
+
+<pre><code># /etc/mknod /dev/lp0 c 2 0
+# /etc/mknod /dev/pc c 1 0
+# /etc/mknod /dev/tty0 c 3 0
+# /etc/mknod /dev/tty1 c 3 1
+# /etc/mknod /dev/tty2 c 3 2
+# /etc/mknod /dev/tty3 c 3 3
+# /etc/mknod /dev/tty4 c 3 4
+# /etc/mknod /dev/tty5 c 3 5
+# /etc/mknod /dev/tty6 c 3 6
+# /etc/mknod /dev/tty7 c 3 7
+</code></pre>
+
+<p>(TODO: permissions?)</p>
+
+<p>To enable the tty lines, edit <code>/etc/ttys</code> (changes take effect after reboot).</p>
+
+<pre><code># ed /etc/ttys
+112
+1,8s/./1/
+w
+112
+q
+</code></pre>
+
+<p>Now to tell <code>df</code>, <code>icheck</code> and <code>dcheck</code> about the disks we have mounted:</p>
+
+<pre><code># chdir /usr/source/s1
+# ed df.c
+1282
+/rp/
+    "/dev/rp0",
+d
+-i
+    "/dev/rk0",
+    "/dev/rk1",
+.
+w
+1295
+q
+# ed icheck.c
+5051
+/rp/
+    "/dev/rrp0",
+d
+-i
+    "/dev/rrk0",
+    "/dev/rrk1",
+.
+w
+5065
+q
+# ed dcheck.c
+3332
+/rp/
+    "/dev/rrp0",
+d
+-i
+    "/dev/rrk0",
+    "/dev/rrk1",
+.
+w
+3346
+q
+# cc df.c
+# mv a.out /bin/df
+# cc icheck.c
+# mv a.out /bin/icheck
+# cc dcheck.c
+# mv a.out /bin/dcheck
+</code></pre>
+
+<p>For some reason <code>df</code> and <code>icheck</code> report <em>bad free count</em> on <em>rk2</em>.
+I don't know how this could be fixed right now.</p>
+
+<p>Now you should have a working UNIX v6 system, have fun with it.</p>
+
+
+</div>
+
+<div id="footer">
+<div class="left"><a href="http://werc.cat-v.org/">Powered by werc</a></div>
+<!-- TODO Maybe should add a programatically generated google search box -->
+<div class="right"><a href="/_users/login">User Login</a></div>
+
+<br>
+<br class="doNotDisplay doNotPrint">
+</div>
+</body></html>
