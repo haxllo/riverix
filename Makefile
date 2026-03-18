@@ -10,6 +10,8 @@ MKFS_VFAT := mkfs.vfat
 SGDISK := sgdisk
 MMD := mmd
 MCOPY := mcopy
+DD := dd
+TRUNCATE := truncate
 
 BUILD_DIR := build
 ISO_DIR := $(BUILD_DIR)/isodir
@@ -17,6 +19,7 @@ KERNEL := $(BUILD_DIR)/kernel.elf
 ISO := $(BUILD_DIR)/riverix.iso
 LOG := $(BUILD_DIR)/qemu.log
 DISK_LOG := $(BUILD_DIR)/qemu-disk.log
+DISK_RECOVERY_LOG := $(BUILD_DIR)/qemu-disk-recovery.log
 DISK_PERSIST_LOG1 := $(BUILD_DIR)/qemu-disk-pass1.log
 DISK_PERSIST_LOG2 := $(BUILD_DIR)/qemu-disk-pass2.log
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
@@ -43,13 +46,16 @@ ROOTFS_IMG := $(BUILD_DIR)/rootfs.img
 MKFS_ROOTFS := $(BUILD_DIR)/mkfs_rootfs
 GRUB_EFI := $(BUILD_DIR)/BOOTX64.EFI
 DISK_IMAGE := $(BUILD_DIR)/riverix-disk.img
+RECOVERY_DISK_IMAGE := $(BUILD_DIR)/riverix-recovery-disk.img
+INSTALL_DISK_IMAGE := tools/install_disk_image.sh
 ESP_SIZE_KIB := 65536
 ESP_START_SECTOR := 2048
-ESP_OFFSET_SECTORS := 2048
-ESP_OFFSET_BYTES := 1048576
 ROOTFS_START_SECTOR := 133120
 ROOTFS_SIZE_SECTORS := 32768
+ROOTFS_PARTITION_LABEL := riverix-rootfs
+ESP_LABEL := RIVERIX
 GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile serial terminal
+INSTALL_GRUB_CONFIG ?= grub/grub-disk.cfg
 
 CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Wextra -Werror -Iinclude
 ASFLAGS := -m32 -Iinclude
@@ -84,7 +90,7 @@ OBJS := \
 	$(BUILD_DIR)/vfs.o \
 	$(BUILD_DIR)/vga.o
 
-.PHONY: all clean run check disk-image run-disk check-disk check-disk-persist
+.PHONY: all clean run check disk-image recovery-disk-image install-image run-disk run-disk-recovery check-disk check-disk-recovery check-disk-persist
 
 all: $(ISO)
 
@@ -193,20 +199,11 @@ $(ROOTFS_IMG): $(USER_ELFS) $(ROOTFS_STATIC_SOURCES) $(MKFS_ROOTFS) | $(BUILD_DI
 $(GRUB_EFI): grub/grub-efi-early.cfg | $(BUILD_DIR)
 	$(GRUB_MKSTANDALONE) -O x86_64-efi -o $@ --modules="$(GRUB_EFI_MODULES)" --install-modules="$(GRUB_EFI_MODULES)" "boot/grub/grub.cfg=grub/grub-efi-early.cfg" >/dev/null
 
-$(DISK_IMAGE): $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk.cfg | $(BUILD_DIR)
-	rm -f $@
-	truncate -s 128M $@
-	$(SGDISK) -o -n 1:$(ESP_START_SECTOR):+64M -t 1:ef00 -c 1:"EFI System" -n 2:$(ROOTFS_START_SECTOR):+16M -t 2:8300 -c 2:"riverix-rootfs" $@ >/dev/null
-	$(MKFS_VFAT) -F 32 -n RIVERIX --offset=$(ESP_START_SECTOR) -h $(ESP_START_SECTOR) $@ $(ESP_SIZE_KIB) >/dev/null
-	test $$(stat -c %s $(ROOTFS_IMG)) -le $$(( $(ROOTFS_SIZE_SECTORS) * 512 ))
-	dd if=$(ROOTFS_IMG) of=$@ bs=512 seek=$(ROOTFS_START_SECTOR) conv=notrunc status=none
-	$(MMD) -i $@@@$(ESP_OFFSET_BYTES) ::/EFI
-	$(MMD) -i $@@@$(ESP_OFFSET_BYTES) ::/EFI/BOOT
-	$(MMD) -i $@@@$(ESP_OFFSET_BYTES) ::/boot
-	$(MMD) -i $@@@$(ESP_OFFSET_BYTES) ::/boot/grub
-	$(MCOPY) -i $@@@$(ESP_OFFSET_BYTES) $(GRUB_EFI) ::/EFI/BOOT/BOOTX64.EFI
-	$(MCOPY) -i $@@@$(ESP_OFFSET_BYTES) $(KERNEL) ::/boot/kernel.elf
-	$(MCOPY) -i $@@@$(ESP_OFFSET_BYTES) grub/grub-disk.cfg ::/boot/grub/grub.cfg
+$(DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk.cfg | $(BUILD_DIR)
+	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
+
+$(RECOVERY_DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk-recovery.cfg | $(BUILD_DIR)
+	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk-recovery.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
 
 $(KERNEL): $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
@@ -234,9 +231,19 @@ run: $(ISO) $(OVMF_VARS)
 
 disk-image: $(DISK_IMAGE)
 
+recovery-disk-image: $(RECOVERY_DISK_IMAGE)
+
+install-image: $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) $(INSTALL_GRUB_CONFIG)
+	@test -n "$(OUTPUT)" || { printf 'usage: make install-image OUTPUT=/path/to/riverix.img [INSTALL_GRUB_CONFIG=grub/grub-disk.cfg]\n' >&2; exit 1; }
+	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$(OUTPUT)" --grub-config "$(INSTALL_GRUB_CONFIG)" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
+
 run-disk: $(DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+
+run-disk-recovery: $(RECOVERY_DISK_IMAGE) | $(BUILD_DIR)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 check: $(ISO) $(OVMF_VARS)
 	rm -f $(LOG)
@@ -252,6 +259,7 @@ check: $(ISO) $(OVMF_VARS)
 	grep -q "kstack: ready slots 0x" $(LOG)
 	grep -q "kstack: selftest ok" $(LOG)
 	grep -q "idt: loaded" $(LOG)
+	grep -q "vfs: root policy ramdisk" $(LOG)
 	grep -q "ramdisk: rootfs module bytes 0x" $(LOG)
 	grep -q "block: registered rootfs0 blocks 0x" $(LOG)
 	grep -q "simplefs: mounted rootfs0 inodes 0x" $(LOG)
@@ -316,6 +324,7 @@ check-disk: | $(BUILD_DIR)
 	grep -q "kheap: selftest ok" $(DISK_LOG)
 	grep -q "kstack: ready slots 0x" $(DISK_LOG)
 	grep -q "kstack: selftest ok" $(DISK_LOG)
+	grep -q "vfs: root policy disk" $(DISK_LOG)
 	grep -q "block: registered ata0 blocks 0x" $(DISK_LOG)
 	grep -q "ata: detected ata0 sectors 0x" $(DISK_LOG)
 	grep -q "block: registered ata0p2 blocks 0x" $(DISK_LOG)
@@ -366,6 +375,45 @@ check-disk: | $(BUILD_DIR)
 	grep -q "pit: tick" $(DISK_LOG)
 	! grep -q "ramdisk: rootfs module bytes 0x" $(DISK_LOG)
 	@printf 'check passed: %s\n' "$(DISK_LOG)"
+
+check-disk-recovery: | $(BUILD_DIR)
+	rm -f $(RECOVERY_DISK_IMAGE)
+	$(MAKE) $(RECOVERY_DISK_IMAGE)
+	rm -f $(DISK_RECOVERY_LOG)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	timeout 20s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial file:$(DISK_RECOVERY_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	grep -q "riverix: kernel_main reached" $(DISK_RECOVERY_LOG)
+	grep -q "memory: map complete" $(DISK_RECOVERY_LOG)
+	grep -q "kheap: ready base 0x" $(DISK_RECOVERY_LOG)
+	grep -q "kheap: selftest ok" $(DISK_RECOVERY_LOG)
+	grep -q "kstack: ready slots 0x" $(DISK_RECOVERY_LOG)
+	grep -q "kstack: selftest ok" $(DISK_RECOVERY_LOG)
+	grep -q "vfs: root policy ramdisk" $(DISK_RECOVERY_LOG)
+	grep -q "ramdisk: rootfs module bytes 0x" $(DISK_RECOVERY_LOG)
+	grep -q "block: registered rootfs0 blocks 0x" $(DISK_RECOVERY_LOG)
+	grep -q "simplefs: mounted rootfs0 inodes 0x" $(DISK_RECOVERY_LOG)
+	grep -q "vfs: rootfs mounted from ramdisk" $(DISK_RECOVERY_LOG)
+	grep -q "storage: writable smoke skipped" $(DISK_RECOVERY_LOG)
+	grep -q "exec: loaded /bin/init entry 0x" $(DISK_RECOVERY_LOG)
+	grep -q "task: init as 0x" $(DISK_RECOVERY_LOG)
+	grep -q "init: online" $(DISK_RECOVERY_LOG)
+	grep -q "exec: loaded /bin/selftest entry 0x" $(DISK_RECOVERY_LOG)
+	grep -q "init: child exit 0x0000002A" $(DISK_RECOVERY_LOG)
+	grep -q "init: fault exit 0x0000008E" $(DISK_RECOVERY_LOG)
+	grep -q "init: cow exit 0x00000033" $(DISK_RECOVERY_LOG)
+	grep -q "init: cow parent 0x11111111" $(DISK_RECOVERY_LOG)
+	grep -q "init: churn ok" $(DISK_RECOVERY_LOG)
+	grep -q "exec: loaded /bin/phase4 entry 0x" $(DISK_RECOVERY_LOG)
+	grep -q "phase4: writable skipped" $(DISK_RECOVERY_LOG)
+	grep -q "init: phase4 exit 0x00000040" $(DISK_RECOVERY_LOG)
+	grep -q "init: selftest exit 0x00000000" $(DISK_RECOVERY_LOG)
+	grep -q "phase5: shell script ro" $(DISK_RECOVERY_LOG)
+	grep -q "phase5: ro done" $(DISK_RECOVERY_LOG)
+	grep -q "init: rc exit 0x00000000" $(DISK_RECOVERY_LOG)
+	grep -q "init: shell handoff" $(DISK_RECOVERY_LOG)
+	grep -q "pit: tick" $(DISK_RECOVERY_LOG)
+	! grep -q "vfs: rootfs mounted from disk" $(DISK_RECOVERY_LOG)
+	@printf 'check passed: %s\n' "$(DISK_RECOVERY_LOG)"
 
 check-disk-persist: | $(BUILD_DIR)
 	rm -f $(DISK_IMAGE)

@@ -67,7 +67,11 @@ userland runtime, mixed assembly/C user builds, line-buffered `/dev/console` inp
 COM1, `execv` with `argc`/`argv` stack setup, and the first real user tools: `echo`,
 `ls`, `cat`, `mkdir`, `rm`, and `ps`. The ISO path runs `/etc/rc-ro`, while the disk
 path runs `/etc/rc-disk`, which exercises external command launch plus simple stdout
-redirection before the system settles into the interactive shell prompt.
+redirection before the system settles into the interactive shell prompt. Phase 6 has now
+started too: the installed disk image carries both the persistent rootfs partition and a
+known-good `/boot/rootfs.img` recovery payload in the ESP, the kernel honors explicit
+`root=disk` and `root=ramdisk` boot policies, and the build now exposes a reusable
+host-side disk-image installer plus a recovery-first disk image target.
 
 ## Why this shape
 
@@ -101,6 +105,7 @@ This produces:
 - `build/kernel.elf`
 - `build/riverix.iso`
 - `build/riverix-disk.img` via `make disk-image`
+- `build/riverix-recovery-disk.img` via `make recovery-disk-image`
 
 ## Run
 
@@ -114,6 +119,18 @@ For the raw GPT/EFI disk image:
 make run-disk
 ```
 
+For the recovery-first disk image:
+
+```bash
+make run-disk-recovery
+```
+
+To install the current build to an arbitrary raw image path:
+
+```bash
+make install-image OUTPUT=/tmp/riverix.img
+```
+
 ## Verify
 
 ```bash
@@ -124,6 +141,12 @@ For the raw GPT/EFI disk image:
 
 ```bash
 make check-disk
+```
+
+For the recovery disk image:
+
+```bash
+make check-disk-recovery
 ```
 
 To verify persistence across two boots:
@@ -144,6 +167,10 @@ driver, GPT rootfs partition discovery, disk-backed `simplefs` mount, the same u
 process lifecycle, the writable Phase 4 filesystem/fd proof, and timer-driven scheduler
 activity.
 
+The `check-disk-recovery` target boots a recovery-first raw disk image in headless QEMU,
+verifies that GRUB loads the ramdisk rootfs from the ESP, confirms that the kernel honors
+`root=ramdisk`, and then runs the same selftest and shell bootstrap on the recovery path.
+
 The `check-disk-persist` target rebuilds a fresh disk image, boots it twice, and confirms
 that the writable rootfs path persists the `/var/bootcount` update from the first boot to
 the second.
@@ -153,21 +180,25 @@ the second.
 This repository builds and tests correctly inside WSL. The disk-image path uses only
 user-space tools (`sgdisk`, `mkfs.vfat`, `mtools`, `dd`) so the checkout can live on the
 Windows side and still be built from WSL without loop devices or root-only mount steps.
-There is no native Windows build script yet; the supported development path is still
-Unix-like tooling inside WSL.
+The install target can also write directly to a Windows-visible path such as
+`/mnt/c/.../riverix.img` as long as the required Unix tools are installed in WSL. There is
+still no native Windows build script; the supported development path is Unix-like tooling
+inside WSL.
 
 ## Reference material
 
 See `references/README.md` for the downloaded source material that guides the design.
 See `docs/plans/2026-03-16-riverix-system-roadmap.md` for the current end-to-end roadmap.
+See `docs/disk-layout.md` for the installed GPT/EFI layout and recovery boot flow.
 See `docs/plans/2026-03-16-phase-3-completion.md` for the Phase 3 completion breakdown.
 See `docs/plans/2026-03-18-phase-4-abi-growth.md` for the Phase 4 implementation plan.
 See `docs/plans/2026-03-18-phase-5-userland-bootstrap.md` for the Phase 5 implementation plan.
+See `docs/plans/2026-03-19-phase-6-install-and-recovery.md` for the current Phase 6 plan.
 See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Start Phase 6 install and persistence tooling around the new shell/bootstrap path instead of only raw QEMU images.
+1. Finish Phase 6 beyond image tooling by adding a stronger installer and recovery userland path instead of relying only on boot-policy selection.
 2. Expand the shell and base userland beyond the first tool set while keeping the ABI conservative.
 3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
 4. Replace the narrow ATA PIO path with a broader disk stack that can grow into PCI/AHCI or NVMe.

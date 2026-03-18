@@ -6,6 +6,7 @@
 #include "kernel/block.h"
 #include "kernel/console.h"
 #include "kernel/kheap.h"
+#include "kernel/paging.h"
 #include "kernel/partition.h"
 #include "kernel/ramdisk.h"
 #include "kernel/serial.h"
@@ -19,6 +20,12 @@ static int32_t vfs_append_child(vfs_inode_t *directory, vfs_inode_t *child);
 static int32_t vfs_mount_root(vfs_inode_t **out_root, block_device_t *device);
 static int32_t vfs_try_mount_disk_root(vfs_inode_t **out_root);
 static int32_t vfs_try_mount_ramdisk_root(const multiboot_info_t *multiboot_info, vfs_inode_t **out_root);
+
+typedef enum vfs_root_policy {
+    VFS_ROOT_AUTO = 0,
+    VFS_ROOT_DISK,
+    VFS_ROOT_RAMDISK,
+} vfs_root_policy_t;
 
 static const vfs_file_ops_t console_ops = {
     .read = console_inode_read,
@@ -51,6 +58,35 @@ static uint32_t string_length(const char *text) {
     }
 
     return length;
+}
+
+static int string_contains(const char *text, const char *pattern) {
+    uint32_t text_length = string_length(text);
+    uint32_t pattern_length = string_length(pattern);
+    uint32_t start;
+    uint32_t index;
+
+    if (pattern == 0 || pattern_length == 0u) {
+        return 1;
+    }
+
+    if (text == 0 || pattern_length > text_length) {
+        return 0;
+    }
+
+    for (start = 0u; start <= (text_length - pattern_length); start++) {
+        for (index = 0u; index < pattern_length; index++) {
+            if (text[start + index] != pattern[index]) {
+                break;
+            }
+        }
+
+        if (index == pattern_length) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 static void zero_bytes(void *buffer, uint32_t length) {
@@ -435,8 +471,41 @@ static int32_t vfs_try_mount_ramdisk_root(const multiboot_info_t *multiboot_info
     return 0;
 }
 
+static vfs_root_policy_t vfs_root_policy_from_multiboot(const multiboot_info_t *multiboot_info) {
+    const char *cmdline = 0;
+
+    if (multiboot_info == 0 ||
+        (multiboot_info->flags & MULTIBOOT_INFO_CMDLINE) == 0u ||
+        multiboot_info->cmdline == 0u) {
+        return VFS_ROOT_AUTO;
+    }
+
+    cmdline = (const char *)paging_phys_to_virt(multiboot_info->cmdline);
+    if (string_contains(cmdline, "root=ramdisk")) {
+        return VFS_ROOT_RAMDISK;
+    }
+
+    if (string_contains(cmdline, "root=disk")) {
+        return VFS_ROOT_DISK;
+    }
+
+    return VFS_ROOT_AUTO;
+}
+
+static const char *vfs_root_policy_name(vfs_root_policy_t policy) {
+    switch (policy) {
+    case VFS_ROOT_DISK:
+        return "disk";
+    case VFS_ROOT_RAMDISK:
+        return "ramdisk";
+    default:
+        return "auto";
+    }
+}
+
 void vfs_init(const multiboot_info_t *multiboot_info) {
     vfs_inode_t *dev_directory;
+    vfs_root_policy_t root_policy;
 
     root_inode = 0;
     root_writable = 0u;
@@ -452,10 +521,33 @@ void vfs_init(const multiboot_info_t *multiboot_info) {
     }
 
     block_init();
-    if (vfs_try_mount_disk_root(&root_inode) != 0 && vfs_try_mount_ramdisk_root(multiboot_info, &root_inode) != 0) {
-        root_inode = 0;
-        console_write("vfs: no bootable rootfs\n");
-        return;
+    root_policy = vfs_root_policy_from_multiboot(multiboot_info);
+    console_write("vfs: root policy ");
+    console_write(vfs_root_policy_name(root_policy));
+    console_write("\n");
+
+    switch (root_policy) {
+    case VFS_ROOT_DISK:
+        if (vfs_try_mount_disk_root(&root_inode) != 0) {
+            root_inode = 0;
+            console_write("vfs: forced disk rootfs unavailable\n");
+            return;
+        }
+        break;
+    case VFS_ROOT_RAMDISK:
+        if (vfs_try_mount_ramdisk_root(multiboot_info, &root_inode) != 0) {
+            root_inode = 0;
+            console_write("vfs: forced ramdisk rootfs unavailable\n");
+            return;
+        }
+        break;
+    default:
+        if (vfs_try_mount_disk_root(&root_inode) != 0 && vfs_try_mount_ramdisk_root(multiboot_info, &root_inode) != 0) {
+            root_inode = 0;
+            console_write("vfs: no bootable rootfs\n");
+            return;
+        }
+        break;
     }
 
     console_inode.ref_count = 0u;
