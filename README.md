@@ -67,21 +67,17 @@ userland runtime, mixed assembly/C user builds, line-buffered `/dev/console` inp
 COM1, `execv` with `argc`/`argv` stack setup, and the first real user tools: `echo`,
 `ls`, `cat`, `mkdir`, `rm`, and `ps`. The ISO path runs `/etc/rc-ro`, while the disk
 path runs `/etc/rc-disk`, which exercises external command launch plus simple stdout
-redirection before the system settles into the interactive shell prompt. Phase 6 has now
-started too: the installed disk image carries both the persistent rootfs partition and a
+redirection before the system settles into the interactive shell prompt. Phase 6 is now
+complete: the installed disk image carries both the persistent rootfs partition and a
 known-good `/boot/rootfs.img` recovery payload in the ESP, the kernel honors explicit
-`root=disk` and `root=ramdisk` boot policies, and the build now exposes a reusable
-host-side disk-image installer plus a recovery-first disk image target. The next Phase 6
-slice is now in place too: boot-mode parsing lives in a shared kernel `bootinfo` layer,
-userspace can query boot mode and cwd directly through syscalls, `/bin/init` explicitly
-switches into recovery mode when `recovery=1` is present, and the recovery image now runs
-`/etc/rc-recovery` with `/bin/bootmode` and `/bin/pwd` before handing off to an
-interactive shell. Phase 6.3 is now in place too: recovery mode exposes a real reinstall
-path that block-copies the known-good ramdisk rootfs back onto the installed
-`riverix-rootfs` partition through a narrow recovery-only syscall, `/bin/reinstall`, and
-`/etc/rc-reinstall`. The repository now has an automated three-boot proof that the
-reinstall path really resets persisted disk state instead of only printing recovery
-markers.
+`root=disk` and `root=ramdisk` boot policies, the build exposes a reusable host-side
+disk-image installer plus recovery-first and reinstall-first image targets, boot-mode
+parsing lives in a shared kernel `bootinfo` layer, userspace can query boot mode and cwd
+directly through syscalls, `/bin/init` explicitly switches into recovery and reinstall
+modes, and recovery mode can either boot into an inspection shell or restore the
+installed `riverix-rootfs` partition from the known-good ramdisk image. The repository now
+has automated proofs for normal disk boot, recovery boot, reinstall reset, and
+persistence across reboot, which satisfies the Phase 6 install-story exit criterion.
 
 ## Why this shape
 
@@ -236,7 +232,7 @@ See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Expand recovery mode beyond full-rootfs reinstall into more selective inspect and repair tooling.
-2. Expand the shell and base userland beyond the first tool set while keeping the ABI conservative.
+1. Start Phase 7 by separating block-controller concerns so the storage stack is not anchored to one narrow ATA PIO path.
+2. Add a broader hardware-backed disk path, ideally AHCI or another modern controller flow, while keeping ATA PIO as fallback.
 3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
-4. Replace the narrow ATA PIO path with a broader disk stack that can grow into PCI/AHCI or NVMe.
+4. Expand the shell and base userland beyond the first tool set while keeping the ABI conservative.
