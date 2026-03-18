@@ -14,13 +14,16 @@
 
 #define MAX_TASKS 8u
 #define TASK_EFLAGS 0x00000202u
-#define PROC_EXEC_PATH_MAX 64u
+#define PROC_PATH_MAX VFS_PATH_MAX
+#define PROC_PATH_COMPONENT_MAX VFS_NAME_MAX
+#define PROC_PATH_COMPONENTS_MAX 24u
 
 typedef enum task_state {
     TASK_UNUSED = 0,
     TASK_RUNNABLE,
     TASK_RUNNING,
     TASK_BLOCKED,
+    TASK_SLEEPING,
     TASK_ZOMBIE,
 } task_state_t;
 
@@ -46,7 +49,9 @@ typedef struct task {
     int32_t exit_status;
     int32_t wait_target_pid;
     uint32_t wait_status_user;
+    uint32_t wake_tick;
     uint32_t reap_ready;
+    char cwd[PROC_PATH_MAX];
     vfs_file_t *fd_table[VFS_MAX_FDS];
 } task_t;
 
@@ -103,7 +108,10 @@ static void task_reset(task_t *task) {
     task->exit_status = 0;
     task->wait_target_pid = -1;
     task->wait_status_user = 0u;
+    task->wake_tick = 0u;
     task->reap_ready = 0u;
+    task->cwd[0] = '/';
+    task->cwd[1] = '\0';
 
     for (index = 0u; index < VFS_MAX_FDS; index++) {
         task->fd_table[index] = 0;
@@ -239,6 +247,21 @@ static uint32_t string_length(const char *text) {
     return length;
 }
 
+static void string_copy(char *destination, const char *source, uint32_t max_length) {
+    uint32_t index = 0u;
+
+    if (destination == 0 || source == 0 || max_length == 0u) {
+        return;
+    }
+
+    while ((index + 1u) < max_length && source[index] != '\0') {
+        destination[index] = source[index];
+        index++;
+    }
+
+    destination[index] = '\0';
+}
+
 static void write_hex32_to_fd(uint32_t fd, uint32_t value) {
     static const char hex_digits[] = "0123456789ABCDEF";
     char buffer[8];
@@ -250,6 +273,163 @@ static void write_hex32_to_fd(uint32_t fd, uint32_t value) {
     }
 
     (void)sys_write(fd, buffer, 8u);
+}
+
+static int proc_allocate_fd_slot(task_t *task) {
+    uint32_t index;
+
+    if (task == 0) {
+        return -1;
+    }
+
+    for (index = 0u; index < VFS_MAX_FDS; index++) {
+        if (task->fd_table[index] == 0) {
+            return (int)index;
+        }
+    }
+
+    return -1;
+}
+
+static int proc_install_fd(task_t *task, int32_t fd, vfs_file_t *file) {
+    if (task == 0 || file == 0 || fd < 0 || (uint32_t)fd >= VFS_MAX_FDS || task->fd_table[(uint32_t)fd] != 0) {
+        return -1;
+    }
+
+    task->fd_table[(uint32_t)fd] = file;
+    return fd;
+}
+
+static vfs_file_t *proc_lookup_fd(task_t *task, uint32_t fd) {
+    if (task == 0 || fd >= VFS_MAX_FDS) {
+        return 0;
+    }
+
+    return task->fd_table[fd];
+}
+
+static void proc_wake_sleepers(void) {
+    uint32_t index;
+    uint32_t ticks = pit_ticks();
+
+    for (index = 0u; index < MAX_TASKS; index++) {
+        task_t *task = &tasks[index];
+
+        if (task->state != TASK_SLEEPING) {
+            continue;
+        }
+
+        if ((int32_t)(ticks - task->wake_tick) < 0) {
+            continue;
+        }
+
+        task->wake_tick = 0u;
+        task->state = TASK_RUNNABLE;
+    }
+}
+
+static int proc_push_component(char components[PROC_PATH_COMPONENTS_MAX][PROC_PATH_COMPONENT_MAX], uint32_t *component_count, const char *source, uint32_t length) {
+    uint32_t index;
+
+    if (component_count == 0 || source == 0 || length == 0u || length >= PROC_PATH_COMPONENT_MAX || *component_count >= PROC_PATH_COMPONENTS_MAX) {
+        return -1;
+    }
+
+    for (index = 0u; index < length; index++) {
+        components[*component_count][index] = source[index];
+    }
+    components[*component_count][length] = '\0';
+    (*component_count)++;
+    return 0;
+}
+
+static int proc_consume_path(char components[PROC_PATH_COMPONENTS_MAX][PROC_PATH_COMPONENT_MAX], uint32_t *component_count, const char *path) {
+    const char *cursor = path;
+
+    if (component_count == 0 || path == 0) {
+        return -1;
+    }
+
+    while (*cursor != '\0') {
+        const char *component_start;
+        uint32_t component_length = 0u;
+
+        while (*cursor == '/') {
+            cursor++;
+        }
+
+        if (*cursor == '\0') {
+            break;
+        }
+
+        component_start = cursor;
+        while (*cursor != '\0' && *cursor != '/') {
+            cursor++;
+            component_length++;
+        }
+
+        if (component_length == 1u && component_start[0] == '.') {
+            continue;
+        }
+
+        if (component_length == 2u && component_start[0] == '.' && component_start[1] == '.') {
+            if (*component_count != 0u) {
+                (*component_count)--;
+            }
+            continue;
+        }
+
+        if (proc_push_component(components, component_count, component_start, component_length) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int proc_normalize_path(const task_t *task, const char *path, char *absolute_path, uint32_t max_length) {
+    char components[PROC_PATH_COMPONENTS_MAX][PROC_PATH_COMPONENT_MAX];
+    uint32_t component_count = 0u;
+    uint32_t offset = 0u;
+    uint32_t index;
+
+    if (task == 0 || path == 0 || absolute_path == 0 || max_length < 2u || path[0] == '\0') {
+        return -1;
+    }
+
+    if (path[0] != '/' && proc_consume_path(components, &component_count, task->cwd) != 0) {
+        return -1;
+    }
+
+    if (proc_consume_path(components, &component_count, path) != 0) {
+        return -1;
+    }
+
+    absolute_path[offset++] = '/';
+    if (component_count == 0u) {
+        absolute_path[offset] = '\0';
+        return 0;
+    }
+
+    for (index = 0u; index < component_count; index++) {
+        uint32_t length = string_length(components[index]);
+        uint32_t component_index;
+
+        if ((offset + length + 1u) >= max_length) {
+            return -1;
+        }
+
+        for (component_index = 0u; component_index < length; component_index++) {
+            absolute_path[offset++] = components[index][component_index];
+        }
+
+        if ((index + 1u) < component_count) {
+            absolute_path[offset++] = '/';
+        }
+    }
+
+    absolute_path[offset] = '\0';
+    return 0;
 }
 
 static task_t *proc_create_kernel_task(const char *name, task_entry_t entry, void *arg) {
@@ -625,6 +805,7 @@ uint32_t proc_schedule(interrupt_frame_t *frame) {
         }
     }
 
+    proc_wake_sleepers();
     proc_collect_reapable_zombies();
 
     next_task = proc_pick_next();
@@ -650,12 +831,186 @@ uint32_t proc_current_pid(void) {
     return current_task->pid;
 }
 
+uint32_t proc_current_ticks(void) {
+    return pit_ticks();
+}
+
+int proc_preemptible_from_interrupt(const interrupt_frame_t *frame) {
+    if (frame == 0 || current_task == 0) {
+        return 1;
+    }
+
+    if (current_task->kind == TASK_USER && !interrupt_from_user(frame)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+int32_t proc_open_fd(const char *path, uint32_t flags) {
+    char absolute_path[PROC_PATH_MAX];
+    vfs_file_t *file = 0;
+    int32_t fd;
+
+    if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
+        return -1;
+    }
+
+    if ((flags & VFS_O_RDWR) == 0u || (flags & ~(VFS_O_RDWR | VFS_O_CREATE | VFS_O_TRUNC)) != 0u) {
+        return -1;
+    }
+
+    fd = proc_allocate_fd_slot(current_task);
+    if (fd < 0) {
+        return -1;
+    }
+
+    if (vfs_open_path(&file, absolute_path, flags & ~VFS_O_CREATE) != 0) {
+        if ((flags & VFS_O_CREATE) == 0u || vfs_create_path(&file, absolute_path, flags & ~VFS_O_CREATE) != 0) {
+            return -1;
+        }
+    }
+
+    if ((flags & VFS_O_TRUNC) != 0u && (flags & VFS_O_WRONLY) != 0u) {
+        if (vfs_truncate_file(file, 0u) != 0) {
+            vfs_close_file(file);
+            return -1;
+        }
+    }
+
+    if (proc_install_fd(current_task, fd, file) < 0) {
+        vfs_close_file(file);
+        return -1;
+    }
+
+    return fd;
+}
+
+int32_t proc_close_fd(uint32_t fd) {
+    vfs_file_t *file;
+
+    if (current_task == 0 || fd >= VFS_MAX_FDS) {
+        return -1;
+    }
+
+    file = current_task->fd_table[fd];
+    if (file == 0) {
+        return -1;
+    }
+
+    current_task->fd_table[fd] = 0;
+    vfs_close_file(file);
+    return 0;
+}
+
+int32_t proc_read_fd(uint32_t fd, void *buffer, uint32_t length) {
+    if (current_task == 0) {
+        return -1;
+    }
+
+    return vfs_read_fd(current_task->fd_table, VFS_MAX_FDS, fd, buffer, length);
+}
+
 int32_t proc_write_fd(uint32_t fd, const char *buffer, uint32_t length) {
     if (current_task == 0) {
         return -1;
     }
 
     return vfs_write_fd(current_task->fd_table, VFS_MAX_FDS, fd, buffer, length);
+}
+
+int32_t proc_seek_fd(uint32_t fd, int32_t offset, uint32_t whence) {
+    vfs_file_t *file = proc_lookup_fd(current_task, fd);
+
+    if (file == 0) {
+        return -1;
+    }
+
+    return vfs_seek_file(file, offset, whence);
+}
+
+int32_t proc_mkdir(const char *path) {
+    char absolute_path[PROC_PATH_MAX];
+
+    if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
+        return -1;
+    }
+
+    return vfs_mkdir_path(absolute_path);
+}
+
+int32_t proc_unlink(const char *path) {
+    char absolute_path[PROC_PATH_MAX];
+
+    if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
+        return -1;
+    }
+
+    return vfs_unlink_path(absolute_path);
+}
+
+int32_t proc_stat(const char *path, vfs_stat_t *stat) {
+    char absolute_path[PROC_PATH_MAX];
+
+    if (current_task == 0 || path == 0 || stat == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
+        return -1;
+    }
+
+    return vfs_stat_path(absolute_path, stat);
+}
+
+int32_t proc_chdir(const char *path) {
+    char absolute_path[PROC_PATH_MAX];
+    vfs_stat_t stat;
+
+    if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
+        return -1;
+    }
+
+    if (vfs_stat_path(absolute_path, &stat) != 0 || stat.kind != VFS_INODE_DIR) {
+        return -1;
+    }
+
+    string_copy(current_task->cwd, absolute_path, sizeof(current_task->cwd));
+    return 0;
+}
+
+int32_t proc_dup(uint32_t fd) {
+    vfs_file_t *file = proc_lookup_fd(current_task, fd);
+    int32_t new_fd;
+
+    if (file == 0) {
+        return -1;
+    }
+
+    new_fd = proc_allocate_fd_slot(current_task);
+    if (new_fd < 0) {
+        return -1;
+    }
+
+    vfs_retain_file(file);
+    current_task->fd_table[(uint32_t)new_fd] = file;
+    return new_fd;
+}
+
+int32_t proc_dup2(uint32_t oldfd, uint32_t newfd) {
+    vfs_file_t *file = proc_lookup_fd(current_task, oldfd);
+
+    if (file == 0 || current_task == 0 || newfd >= VFS_MAX_FDS) {
+        return -1;
+    }
+
+    if (oldfd == newfd) {
+        return (int32_t)newfd;
+    }
+
+    if (current_task->fd_table[newfd] != 0) {
+        (void)proc_close_fd(newfd);
+    }
+
+    vfs_retain_file(file);
+    current_task->fd_table[newfd] = file;
+    return (int32_t)newfd;
 }
 
 uint32_t proc_sys_exit(interrupt_frame_t *frame, int32_t status) {
@@ -709,7 +1064,7 @@ uint32_t proc_sys_waitpid(interrupt_frame_t *frame, int32_t pid, uint32_t status
 }
 
 uint32_t proc_sys_exec(interrupt_frame_t *frame, uint32_t path_user) {
-    char path[PROC_EXEC_PATH_MAX];
+    char path[PROC_PATH_MAX];
     exec_image_t old_image;
     exec_image_t new_image;
     interrupt_user_frame_t *new_frame;
@@ -802,6 +1157,7 @@ uint32_t proc_sys_fork(interrupt_frame_t *frame) {
     child->name = current_task->name;
     child->pid = next_pid++;
     child->parent_pid = current_task->pid;
+    string_copy(child->cwd, current_task->cwd, sizeof(child->cwd));
     child->state = TASK_RUNNABLE;
 
     frame->eax = child->pid;
@@ -811,4 +1167,21 @@ uint32_t proc_sys_fork(interrupt_frame_t *frame) {
     console_write("\n");
 
     return (uint32_t)(uintptr_t)frame;
+}
+
+uint32_t proc_sys_sleep(interrupt_frame_t *frame, uint32_t ticks) {
+    if (current_task == 0) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    if (ticks == 0u) {
+        frame->eax = 0u;
+        return proc_schedule(frame);
+    }
+
+    current_task->wake_tick = pit_ticks() + ticks;
+    current_task->state = TASK_SLEEPING;
+    frame->eax = 0u;
+    return proc_schedule(frame);
 }

@@ -147,6 +147,39 @@ churn_loop:
     mov $churn_ok_banner, %ecx
     mov $(churn_ok_banner_end - churn_ok_banner), %edx
     call write_stdout
+    mov $SYS_FORK, %eax
+    int $0x80
+    cmpl $-1, %eax
+    je phase4_fork_failed
+    test %eax, %eax
+    je phase4_exec
+
+    mov %eax, %esi
+    sub $4, %esp
+    movl $0, (%esp)
+    mov $SYS_WAITPID, %eax
+    mov %esi, %ebx
+    mov %esp, %ecx
+    int $0x80
+    cmpl $-1, %eax
+    je phase4_wait_failed
+
+    mov $phase4_exit_banner, %ecx
+    mov $(phase4_exit_banner_end - phase4_exit_banner), %edx
+    call write_stdout
+    mov (%esp), %eax
+    call write_hex32
+    mov $newline, %ecx
+    mov $1, %edx
+    call write_stdout
+    add $4, %esp
+    mov $SYS_EXIT, %eax
+    mov $0, %ebx
+    int $0x80
+
+    mov $exit_failed_banner, %ecx
+    mov $(exit_failed_banner_end - exit_failed_banner), %edx
+    call write_stdout
     jmp yield_forever
 
 child_exec:
@@ -215,6 +248,24 @@ churn_child:
     call write_stdout
     jmp yield_forever
 
+phase4_exec:
+    mov $SYS_EXEC, %eax
+    mov $phase4_path, %ebx
+    int $0x80
+
+    mov $phase4_exec_failed_banner, %ecx
+    mov $(phase4_exec_failed_banner_end - phase4_exec_failed_banner), %edx
+    call write_stdout
+
+    mov $SYS_EXIT, %eax
+    mov $0x7D, %ebx
+    int $0x80
+
+    mov $exit_failed_banner, %ecx
+    mov $(exit_failed_banner_end - exit_failed_banner), %edx
+    call write_stdout
+    jmp yield_forever
+
 fork_failed:
     mov $fork_failed_banner, %ecx
     mov $(fork_failed_banner_end - fork_failed_banner), %edx
@@ -271,6 +322,19 @@ churn_status_failed:
     add $4, %esp
     mov $churn_status_failed_banner, %ecx
     mov $(churn_status_failed_banner_end - churn_status_failed_banner), %edx
+    call write_stdout
+    jmp yield_forever
+
+phase4_fork_failed:
+    mov $phase4_fork_failed_banner, %ecx
+    mov $(phase4_fork_failed_banner_end - phase4_fork_failed_banner), %edx
+    call write_stdout
+    jmp yield_forever
+
+phase4_wait_failed:
+    add $4, %esp
+    mov $phase4_wait_failed_banner, %ecx
+    mov $(phase4_wait_failed_banner_end - phase4_wait_failed_banner), %edx
     call write_stdout
     jmp yield_forever
 
@@ -383,12 +447,26 @@ churn_wait_failed_banner_end:
 churn_status_failed_banner:
     .ascii "init: churn status failed\n"
 churn_status_failed_banner_end:
+phase4_fork_failed_banner:
+    .ascii "init: phase4 fork failed\n"
+phase4_fork_failed_banner_end:
+phase4_wait_failed_banner:
+    .ascii "init: phase4 waitpid failed\n"
+phase4_wait_failed_banner_end:
+phase4_exec_failed_banner:
+    .ascii "init: phase4 exec failed\n"
+phase4_exec_failed_banner_end:
+phase4_exit_banner:
+    .ascii "init: phase4 exit 0x"
+phase4_exit_banner_end:
 newline:
     .ascii "\n"
 child_path:
     .asciz "/bin/child"
 fault_path:
     .asciz "/bin/fault"
+phase4_path:
+    .asciz "/bin/phase4"
 hex_digits:
     .ascii "0123456789ABCDEF"
 

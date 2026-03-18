@@ -52,7 +52,16 @@ directly from disk. On the disk path, `simplefs` is writable with on-disk inode/
 bitmaps, contiguous extent allocation, kernel-driven file creation and truncation, and a
 boot-time persistence smoke test that updates `/var/bootcount` across reboots. The build
 produces the raw disk image using only user-space tools, which is useful in WSL because it
-avoids loop-mount and root-only image assembly steps.
+avoids loop-mount and root-only image assembly steps. Phase 4 is now in place too: the
+syscall ABI exposes `open`, `close`, `read`, `write`, `lseek`, `mkdir`, `unlink`, `stat`,
+`chdir`, `dup`, `dup2`, `sleep`, and `ticks`, with per-process cwd handling and relative
+path resolution. The shipped `/bin/phase4` user program proves that ABI on both boot
+paths: on the ISO path it exercises read-only pathname and timing calls and emits a clear
+write-skip marker, while on the disk path it creates files under `/var`, reads them back,
+redirects output through `dup2`, unlinks files, removes an empty directory, and confirms
+that those writes survive the persistence test. The current `/bin/init` remains a proof
+harness rather than a long-lived system init; after running the Phase 1 through Phase 4
+checks, it exits cleanly and the kernel continues on worker threads and idle.
 
 ## Why this shape
 
@@ -120,12 +129,14 @@ make check-disk-persist
 The `check` target boots the ISO in headless QEMU, captures serial output, and verifies
 the Multiboot rootfs module handoff, block-device registration, filesystem mount, ELF
 loading of `/bin/init`, the `fork` -> `exec("/bin/child")` -> `waitpid` lifecycle, the
-faulting `/bin/fault` user program with kill-on-fault recovery, the COW fork proof, and
-timer-driven scheduler activity.
+faulting `/bin/fault` user program with kill-on-fault recovery, the COW fork proof, the
+Phase 4 `/bin/phase4` ABI proof on the read-only rootfs path, and timer-driven scheduler
+activity.
 
 The `check-disk` target boots the raw disk image in headless QEMU and verifies the ATA
 driver, GPT rootfs partition discovery, disk-backed `simplefs` mount, the same user-mode
-process lifecycle, and timer-driven scheduler activity.
+process lifecycle, the writable Phase 4 filesystem/fd proof, and timer-driven scheduler
+activity.
 
 The `check-disk-persist` target rebuilds a fresh disk image, boots it twice, and confirms
 that the writable rootfs path persists the `/var/bootcount` update from the first boot to
@@ -144,10 +155,12 @@ Unix-like tooling inside WSL.
 See `references/README.md` for the downloaded source material that guides the design.
 See `docs/plans/2026-03-16-riverix-system-roadmap.md` for the current end-to-end roadmap.
 See `docs/plans/2026-03-16-phase-3-completion.md` for the Phase 3 completion breakdown.
+See `docs/plans/2026-03-18-phase-4-abi-growth.md` for the Phase 4 implementation plan.
+See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Start Phase 4 ABI work: `open`, `close`, `read`, `lseek`, and per-process current working directory.
-2. Finish the remaining writable-filesystem cleanup: unlink/remove, stronger recovery rules, and better writeback discipline.
-3. Grow userspace beyond fixed test binaries into a tiny libc/syscall wrapper layer and real core tools.
+1. Start Phase 5 userland bootstrap with a tiny libc/syscall wrapper layer and real core tools.
+2. Expand the process/user ABI beyond the current proof floor: `argv`, `envp`, and a less synthetic init path.
+3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
 4. Replace the narrow ATA PIO path with a broader disk stack that can grow into PCI/AHCI or NVMe.

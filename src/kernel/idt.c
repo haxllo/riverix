@@ -98,6 +98,12 @@ static void print_fault_details(const interrupt_frame_t *frame) {
     console_write_hex32(frame->int_no);
     console_write(" err 0x");
     console_write_hex32(frame->err_code);
+    console_write(" eip 0x");
+    console_write_hex32(frame->eip);
+    console_write(" cs 0x");
+    console_write_hex32(frame->cs);
+    console_write(" eflags 0x");
+    console_write_hex32(frame->eflags);
 
     if (frame->int_no == 14u) {
         uint32_t cr2;
@@ -148,6 +154,10 @@ uint32_t interrupt_dispatch(interrupt_frame_t *frame) {
         uint32_t next_stack;
 
         pit_handle_tick();
+        if (!proc_preemptible_from_interrupt(frame)) {
+            pic_send_eoi(0u);
+            return (uint32_t)(uintptr_t)frame;
+        }
         next_stack = proc_schedule(frame);
         pic_send_eoi(0u);
         return next_stack;

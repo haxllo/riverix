@@ -5,3 +5,25 @@
 #define SYS_WAITPID 5
 #define SYS_EXEC 6
 #define SYS_FORK 7
+#define SYS_OPEN 8
+#define SYS_CLOSE 9
+#define SYS_READ 10
+#define SYS_LSEEK 11
+#define SYS_MKDIR 12
+#define SYS_UNLINK 13
+#define SYS_STAT 14
+#define SYS_CHDIR 15
+#define SYS_DUP 16
+#define SYS_DUP2 17
+#define SYS_SLEEP 18
+#define SYS_TICKS 19
+
+#define SYS_O_RDONLY 0x1
+#define SYS_O_WRONLY 0x2
+#define SYS_O_RDWR 0x3
+#define SYS_O_CREATE 0x4
+#define SYS_O_TRUNC 0x8
+
+#define SYS_SEEK_SET 0
+#define SYS_SEEK_CUR 1
+#define SYS_SEEK_END 2

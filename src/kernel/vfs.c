@@ -190,6 +190,16 @@ static vfs_file_t *vfs_open_inode(vfs_inode_t *inode, uint32_t flags) {
     return file;
 }
 
+static void vfs_fill_stat(const vfs_inode_t *inode, vfs_stat_t *stat) {
+    if (inode == 0 || stat == 0) {
+        return;
+    }
+
+    stat->kind = inode->kind;
+    stat->size = inode->size;
+    stat->child_count = inode->child_count;
+}
+
 static const vfs_inode_t *vfs_resolve_path(const char *path) {
     const vfs_inode_t *current = root_inode;
     const char *cursor = path;
@@ -247,7 +257,7 @@ static const vfs_inode_t *vfs_resolve_path(const char *path) {
 }
 
 static int32_t vfs_resolve_parent(const char *path, vfs_inode_t **out_parent, char *leaf_name) {
-    char parent_path[64];
+    char parent_path[VFS_PATH_MAX];
     uint32_t parent_length = 0u;
     uint32_t path_length = string_length(path);
     uint32_t last_slash = 0u;
@@ -268,7 +278,7 @@ static int32_t vfs_resolve_parent(const char *path, vfs_inode_t **out_parent, ch
     }
 
     for (index = last_slash + 1u; index < path_length; index++) {
-        if ((index - last_slash) >= 32u) {
+        if ((index - last_slash) >= VFS_NAME_MAX) {
             return -1;
         }
 
@@ -453,6 +463,10 @@ int32_t vfs_read_file(vfs_file_t *file, void *buffer, uint32_t length) {
         return -1;
     }
 
+    if ((file->flags & VFS_O_RDONLY) == 0u) {
+        return -1;
+    }
+
     return file->inode->ops->read(file, buffer, length);
 }
 
@@ -466,6 +480,37 @@ int32_t vfs_write_file(vfs_file_t *file, const char *buffer, uint32_t length) {
     }
 
     return file->inode->ops->write(file, buffer, length);
+}
+
+int32_t vfs_seek_file(vfs_file_t *file, int32_t offset, uint32_t whence) {
+    int64_t base;
+    int64_t target;
+
+    if (file == 0 || file->inode == 0 || file->inode->kind == VFS_INODE_DIR) {
+        return -1;
+    }
+
+    switch (whence) {
+    case VFS_SEEK_SET:
+        base = 0;
+        break;
+    case VFS_SEEK_CUR:
+        base = (int64_t)file->offset;
+        break;
+    case VFS_SEEK_END:
+        base = (int64_t)file->inode->size;
+        break;
+    default:
+        return -1;
+    }
+
+    target = base + (int64_t)offset;
+    if (target < 0 || target > 0x7FFFFFFFll) {
+        return -1;
+    }
+
+    file->offset = (uint32_t)target;
+    return (int32_t)file->offset;
 }
 
 int32_t vfs_truncate_file(vfs_file_t *file, uint32_t length) {
@@ -488,6 +533,54 @@ void vfs_rewind_file(vfs_file_t *file) {
     if (file != 0) {
         file->offset = 0u;
     }
+}
+
+void vfs_retain_file(vfs_file_t *file) {
+    if (file != 0 && file->ref_count != 0u) {
+        file->ref_count++;
+    }
+}
+
+int32_t vfs_mkdir_path(const char *path) {
+    vfs_inode_t *parent;
+    vfs_inode_t *inode;
+    char leaf_name[VFS_NAME_MAX];
+
+    if (path == 0 || vfs_resolve_path(path) != 0) {
+        return -1;
+    }
+
+    if (vfs_resolve_parent(path, &parent, leaf_name) != 0 || parent->inode_ops == 0 || parent->inode_ops->create_child == 0) {
+        return -1;
+    }
+
+    return parent->inode_ops->create_child(parent, leaf_name, VFS_INODE_DIR, &inode);
+}
+
+int32_t vfs_unlink_path(const char *path) {
+    vfs_inode_t *parent;
+    char leaf_name[VFS_NAME_MAX];
+
+    if (path == 0 || path[0] != '/' || path[1] == '\0') {
+        return -1;
+    }
+
+    if (vfs_resolve_parent(path, &parent, leaf_name) != 0 || parent->inode_ops == 0 || parent->inode_ops->remove_child == 0) {
+        return -1;
+    }
+
+    return parent->inode_ops->remove_child(parent, leaf_name);
+}
+
+int32_t vfs_stat_path(const char *path, vfs_stat_t *stat) {
+    const vfs_inode_t *inode = vfs_resolve_path(path);
+
+    if (path == 0 || stat == 0 || inode == 0) {
+        return -1;
+    }
+
+    vfs_fill_stat(inode, stat);
+    return 0;
 }
 
 int32_t vfs_attach_stdio(vfs_file_t **fd_table, uint32_t fd_count) {
@@ -556,6 +649,21 @@ void vfs_detach_fds(vfs_file_t **fd_table, uint32_t fd_count) {
         vfs_release_file(fd_table[index]);
         fd_table[index] = 0;
     }
+}
+
+int32_t vfs_read_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, void *buffer, uint32_t length) {
+    vfs_file_t *file;
+
+    if (fd_table == 0 || buffer == 0 || fd >= fd_count) {
+        return -1;
+    }
+
+    file = fd_table[fd];
+    if (file == 0) {
+        return -1;
+    }
+
+    return vfs_read_file(file, buffer, length);
 }
 
 int32_t vfs_write_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, const char *buffer, uint32_t length) {
