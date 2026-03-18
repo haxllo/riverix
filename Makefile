@@ -4,6 +4,7 @@ LD := ld
 GRUB_MKRESCUE := grub-mkrescue
 GRUB_MKSTANDALONE := grub-mkstandalone
 QEMU := qemu-system-x86_64
+CHECK_TIMEOUT ?= 30s
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS_TEMPLATE := /usr/share/OVMF/OVMF_VARS_4M.fd
 MKFS_VFAT := mkfs.vfat
@@ -248,7 +249,7 @@ run-disk-recovery: $(RECOVERY_DISK_IMAGE) | $(BUILD_DIR)
 check: $(ISO) $(OVMF_VARS)
 	rm -f $(LOG)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout 20s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -cdrom $(ISO) -serial file:$(LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -cdrom $(ISO) -serial file:$(LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(LOG)
 	grep -q "memory: map complete" $(LOG)
 	grep -q "palloc: free pages" $(LOG)
@@ -317,7 +318,7 @@ check-disk: | $(BUILD_DIR)
 	$(MAKE) $(DISK_IMAGE)
 	rm -f $(DISK_LOG)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout 20s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_LOG)
 	grep -q "memory: map complete" $(DISK_LOG)
 	grep -q "kheap: ready base 0x" $(DISK_LOG)
@@ -381,7 +382,7 @@ check-disk-recovery: | $(BUILD_DIR)
 	$(MAKE) $(RECOVERY_DISK_IMAGE)
 	rm -f $(DISK_RECOVERY_LOG)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout 20s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial file:$(DISK_RECOVERY_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial file:$(DISK_RECOVERY_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_RECOVERY_LOG)
 	grep -q "memory: map complete" $(DISK_RECOVERY_LOG)
 	grep -q "kheap: ready base 0x" $(DISK_RECOVERY_LOG)
@@ -420,9 +421,9 @@ check-disk-persist: | $(BUILD_DIR)
 	$(MAKE) $(DISK_IMAGE)
 	rm -f $(DISK_PERSIST_LOG1) $(DISK_PERSIST_LOG2)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout 20s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_PERSIST_LOG1) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_PERSIST_LOG1) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout 20s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_PERSIST_LOG2) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_PERSIST_LOG2) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "vfs: rootfs mounted from disk" $(DISK_PERSIST_LOG1)
 	grep -q "storage: bootcount 0x00000001" $(DISK_PERSIST_LOG1)
 	grep -q "init: child exit 0x0000002A" $(DISK_PERSIST_LOG1)

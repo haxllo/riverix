@@ -155,6 +155,13 @@ To verify persistence across two boots:
 make check-disk-persist
 ```
 
+On slower WSL checkouts under `/mnt/*`, increase the QEMU verification timeout if the
+boot reaches late-userland markers but misses the final greps:
+
+```bash
+make CHECK_TIMEOUT=45s check-disk
+```
+
 The `check` target boots the ISO in headless QEMU, captures serial output, and verifies
 the Multiboot rootfs module handoff, block-device registration, filesystem mount, ELF
 loading of `/bin/init`, the `fork` -> `exec("/bin/child")` -> `waitpid` lifecycle, the
