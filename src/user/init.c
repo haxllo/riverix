@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "user/boot.h"
 #include "user/stdio.h"
 #include "user/unistd.h"
 
@@ -37,9 +38,11 @@ static int detect_writable_root(void) {
 }
 
 int main(int argc, char **argv) {
+    bootinfo_t info;
     static const char *selftest_argv[] = { "selftest", 0 };
     static const char *ro_argv[] = { "sh", "/etc/rc-ro", 0 };
     static const char *disk_argv[] = { "sh", "/etc/rc-disk", 0 };
+    static const char *recovery_argv[] = { "sh", "/etc/rc-recovery", 0 };
     static const char *shell_argv[] = { "sh", 0 };
     const char *const *script_argv;
     int32_t status = 0;
@@ -59,7 +62,13 @@ int main(int argc, char **argv) {
         return status;
     }
 
-    script_argv = detect_writable_root() ? disk_argv : ro_argv;
+    if (getbootinfo(&info) == 0 && (info.flags & BOOT_FLAG_RECOVERY) != 0u) {
+        putstr_fd(1, "init: recovery mode\n");
+        script_argv = recovery_argv;
+    } else {
+        script_argv = detect_writable_root() ? disk_argv : ro_argv;
+    }
+
     if (run_program("/bin/sh", script_argv, &status) < 0) {
         putstr_fd(2, "init: shell script launch failed\n");
         return 1;

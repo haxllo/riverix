@@ -54,9 +54,9 @@ Recovery image:
 - The kernel mounts the ramdisk rootfs and keeps the writable disk path out of the boot
   decision
 
-The `recovery=1` flag is currently a boot-mode marker for future recovery-specific userland
-behavior. The rootfs-selection behavior is already real today because the kernel honors the
-explicit `root=` policy.
+The `recovery=1` flag now drives real recovery-specific userspace behavior: the kernel
+still uses the explicit `root=` policy for rootfs selection, and `/bin/init` now detects
+the recovery flag and runs `/etc/rc-recovery` before handing off to an interactive shell.
 
 ## Host-side install flow
 

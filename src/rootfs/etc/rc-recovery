@@ -1,0 +1,16 @@
+# riverix phase 6 recovery bootstrap
+echo phase6: recovery script
+bootmode
+echo phase6: pwd begin
+pwd
+echo phase6: pwd end
+echo phase6: etc begin
+ls /etc
+echo phase6: etc end
+echo phase6: bin begin
+ls /bin
+echo phase6: bin end
+echo phase6: ps begin
+ps
+echo phase6: ps end
+echo phase6: recovery done

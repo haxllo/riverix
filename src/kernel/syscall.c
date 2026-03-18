@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "kernel/bootinfo.h"
 #include "kernel/idt.h"
 #include "kernel/proc.h"
 #include "kernel/usercopy.h"
@@ -191,6 +192,45 @@ static int32_t sys_procinfo_handler(const interrupt_frame_t *frame, uint32_t ind
     return 0;
 }
 
+static int32_t sys_bootinfo_handler(const interrupt_frame_t *frame, uint32_t info_address) {
+    sys_bootinfo_t info;
+
+    if (info_address == 0u) {
+        return -1;
+    }
+
+    info.root_policy = (uint32_t)bootinfo_root_policy();
+    info.flags = bootinfo_flags();
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(info_address, &info, sizeof(info)) == 0 ? 0 : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)info_address, &info, sizeof(info));
+    return 0;
+}
+
+static int32_t sys_getcwd_handler(const interrupt_frame_t *frame, uint32_t buffer_address, uint32_t buffer_length) {
+    char path[VFS_PATH_MAX];
+    int32_t result;
+
+    if (buffer_address == 0u || buffer_length == 0u) {
+        return -1;
+    }
+
+    result = proc_getcwd(path, sizeof(path));
+    if (result < 0 || ((uint32_t)result + 1u) > buffer_length) {
+        return -1;
+    }
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(buffer_address, path, (uint32_t)result + 1u) == 0 ? result : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)buffer_address, path, (uint32_t)result + 1u);
+    return result;
+}
+
 uint32_t syscall_dispatch(interrupt_frame_t *frame) {
     char path[VFS_PATH_MAX];
 
@@ -270,6 +310,12 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
         return (uint32_t)(uintptr_t)frame;
     case SYS_PROCINFO:
         frame->eax = (uint32_t)sys_procinfo_handler(frame, frame->ebx, frame->ecx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_BOOTINFO:
+        frame->eax = (uint32_t)sys_bootinfo_handler(frame, frame->ebx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_GETCWD:
+        frame->eax = (uint32_t)sys_getcwd_handler(frame, frame->ebx, frame->ecx);
         return (uint32_t)(uintptr_t)frame;
     default:
         frame->eax = (uint32_t)-1;

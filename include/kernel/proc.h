@@ -26,6 +26,7 @@ int32_t proc_unlink(const char *path);
 int32_t proc_stat(const char *path, vfs_stat_t *stat);
 int32_t proc_readdir(const char *path, uint32_t index, sys_dirent_t *entry);
 int32_t proc_procinfo(uint32_t index, sys_procinfo_t *info);
+int32_t proc_getcwd(char *buffer, uint32_t length);
 int32_t proc_chdir(const char *path);
 int32_t proc_dup(uint32_t fd);
 int32_t proc_dup2(uint32_t oldfd, uint32_t newfd);

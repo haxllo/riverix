@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "kernel/bootinfo.h"
 #include "kernel/console.h"
 #include "kernel/gdt.h"
 #include "kernel/idt.h"
@@ -86,6 +87,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     kstack_init();
     (void)kstack_selftest();
 
+    bootinfo_init(high_multiboot_info);
     gdt_init();
     idt_init();
     pic_init();

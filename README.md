@@ -71,7 +71,12 @@ redirection before the system settles into the interactive shell prompt. Phase 6
 started too: the installed disk image carries both the persistent rootfs partition and a
 known-good `/boot/rootfs.img` recovery payload in the ESP, the kernel honors explicit
 `root=disk` and `root=ramdisk` boot policies, and the build now exposes a reusable
-host-side disk-image installer plus a recovery-first disk image target.
+host-side disk-image installer plus a recovery-first disk image target. The next Phase 6
+slice is now in place too: boot-mode parsing lives in a shared kernel `bootinfo` layer,
+userspace can query boot mode and cwd directly through syscalls, `/bin/init` explicitly
+switches into recovery mode when `recovery=1` is present, and the recovery image now runs
+`/etc/rc-recovery` with `/bin/bootmode` and `/bin/pwd` before handing off to an
+interactive shell.
 
 ## Why this shape
 
@@ -176,7 +181,8 @@ activity.
 
 The `check-disk-recovery` target boots a recovery-first raw disk image in headless QEMU,
 verifies that GRUB loads the ramdisk rootfs from the ESP, confirms that the kernel honors
-`root=ramdisk`, and then runs the same selftest and shell bootstrap on the recovery path.
+`root=ramdisk`, confirms that `/bin/init` enters explicit recovery mode, and then runs the
+dedicated recovery script plus shell bootstrap on the recovery path.
 
 The `check-disk-persist` target rebuilds a fresh disk image, boots it twice, and confirms
 that the writable rootfs path persists the `/var/bootcount` update from the first boot to
@@ -201,11 +207,12 @@ See `docs/plans/2026-03-16-phase-3-completion.md` for the Phase 3 completion bre
 See `docs/plans/2026-03-18-phase-4-abi-growth.md` for the Phase 4 implementation plan.
 See `docs/plans/2026-03-18-phase-5-userland-bootstrap.md` for the Phase 5 implementation plan.
 See `docs/plans/2026-03-19-phase-6-install-and-recovery.md` for the current Phase 6 plan.
+See `docs/plans/2026-03-19-phase-6-recovery-userland.md` for the current recovery-userland slice.
 See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Finish Phase 6 beyond image tooling by adding a stronger installer and recovery userland path instead of relying only on boot-policy selection.
+1. Continue Phase 6 with real repair/reinstall behavior so recovery mode can do more than inspect the system.
 2. Expand the shell and base userland beyond the first tool set while keeping the ABI conservative.
 3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
 4. Replace the narrow ATA PIO path with a broader disk stack that can grow into PCI/AHCI or NVMe.

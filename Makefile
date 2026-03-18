@@ -26,7 +26,7 @@ DISK_PERSIST_LOG2 := $(BUILD_DIR)/qemu-disk-pass2.log
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
 USER_LD_SCRIPT := src/user/user.ld
 USER_ASM_PROGRAMS := selftest child fault phase4
-USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps
+USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps bootmode pwd
 USER_PROGRAMS := $(USER_ASM_PROGRAMS) $(USER_C_PROGRAMS)
 USER_ASM_OBJS := $(addprefix $(BUILD_DIR)/user_asm_,$(addsuffix .o,$(USER_ASM_PROGRAMS)))
 USER_C_OBJS := $(addprefix $(BUILD_DIR)/user_c_,$(addsuffix .o,$(USER_C_PROGRAMS)))
@@ -37,11 +37,12 @@ USER_RUNTIME_OBJS := \
 	$(BUILD_DIR)/user_libc_string.o \
 	$(BUILD_DIR)/user_libc_stdio.o
 ROOTFS_BIN_ITEMS := $(foreach program,$(USER_PROGRAMS),$(BUILD_DIR)/user_$(program).elf /bin/$(program))
-ROOTFS_STATIC_SOURCES := src/rootfs/etc/motd src/rootfs/etc/rc-ro src/rootfs/etc/rc-disk
+ROOTFS_STATIC_SOURCES := src/rootfs/etc/motd src/rootfs/etc/rc-ro src/rootfs/etc/rc-disk src/rootfs/etc/rc-recovery
 ROOTFS_STATIC_ITEMS := \
 	src/rootfs/etc/motd /etc/motd \
 	src/rootfs/etc/rc-ro /etc/rc-ro \
-	src/rootfs/etc/rc-disk /etc/rc-disk
+	src/rootfs/etc/rc-disk /etc/rc-disk \
+	src/rootfs/etc/rc-recovery /etc/rc-recovery
 ROOTFS_ITEMS := $(ROOTFS_BIN_ITEMS) $(ROOTFS_STATIC_ITEMS)
 ROOTFS_IMG := $(BUILD_DIR)/rootfs.img
 MKFS_ROOTFS := $(BUILD_DIR)/mkfs_rootfs
@@ -68,6 +69,7 @@ OBJS := \
 	$(BUILD_DIR)/boot.o \
 	$(BUILD_DIR)/block.o \
 	$(BUILD_DIR)/ata.o \
+	$(BUILD_DIR)/bootinfo.o \
 	$(BUILD_DIR)/kernel.o \
 	$(BUILD_DIR)/console.o \
 	$(BUILD_DIR)/exec.o \
@@ -111,6 +113,9 @@ $(BUILD_DIR)/block.o: src/kernel/block.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/ata.o: src/kernel/ata.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/bootinfo.o: src/kernel/bootinfo.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/exec.o: src/kernel/exec.c | $(BUILD_DIR)
@@ -398,6 +403,7 @@ check-disk-recovery: | $(BUILD_DIR)
 	grep -q "exec: loaded /bin/init entry 0x" $(DISK_RECOVERY_LOG)
 	grep -q "task: init as 0x" $(DISK_RECOVERY_LOG)
 	grep -q "init: online" $(DISK_RECOVERY_LOG)
+	grep -q "init: recovery mode" $(DISK_RECOVERY_LOG)
 	grep -q "exec: loaded /bin/selftest entry 0x" $(DISK_RECOVERY_LOG)
 	grep -q "init: child exit 0x0000002A" $(DISK_RECOVERY_LOG)
 	grep -q "init: fault exit 0x0000008E" $(DISK_RECOVERY_LOG)
@@ -408,8 +414,17 @@ check-disk-recovery: | $(BUILD_DIR)
 	grep -q "phase4: writable skipped" $(DISK_RECOVERY_LOG)
 	grep -q "init: phase4 exit 0x00000040" $(DISK_RECOVERY_LOG)
 	grep -q "init: selftest exit 0x00000000" $(DISK_RECOVERY_LOG)
-	grep -q "phase5: shell script ro" $(DISK_RECOVERY_LOG)
-	grep -q "phase5: ro done" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: recovery script" $(DISK_RECOVERY_LOG)
+	grep -q "bootmode: root ramdisk recovery" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: pwd begin" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: pwd end" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: etc begin" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: etc end" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: bin begin" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: bin end" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: ps begin" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: ps end" $(DISK_RECOVERY_LOG)
+	grep -q "phase6: recovery done" $(DISK_RECOVERY_LOG)
 	grep -q "init: rc exit 0x00000000" $(DISK_RECOVERY_LOG)
 	grep -q "init: shell handoff" $(DISK_RECOVERY_LOG)
 	grep -q "pit: tick" $(DISK_RECOVERY_LOG)

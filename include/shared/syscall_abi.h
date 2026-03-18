@@ -28,6 +28,18 @@ enum {
     SYS_EXECV = 20u,
     SYS_READDIR = 21u,
     SYS_PROCINFO = 22u,
+    SYS_BOOTINFO = 23u,
+    SYS_GETCWD = 24u,
+};
+
+enum {
+    SYS_BOOT_ROOT_AUTO = 0u,
+    SYS_BOOT_ROOT_DISK = 1u,
+    SYS_BOOT_ROOT_RAMDISK = 2u,
+};
+
+enum {
+    SYS_BOOT_FLAG_RECOVERY = 1u << 0,
 };
 
 enum {
@@ -78,5 +90,10 @@ typedef struct sys_procinfo {
     uint32_t run_ticks;
     char name[SYS_NAME_MAX];
 } sys_procinfo_t;
+
+typedef struct sys_bootinfo {
+    uint32_t root_policy;
+    uint32_t flags;
+} sys_bootinfo_t;
 
 #endif

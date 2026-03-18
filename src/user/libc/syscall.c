@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "shared/syscall_abi.h"
+#include "user/boot.h"
 #include "user/dirent.h"
 #include "user/proc.h"
 #include "user/sys/stat.h"
@@ -84,6 +85,13 @@ int32_t lseek(int32_t fd, int32_t offset, uint32_t whence) {
     return result;
 }
 
+int32_t getcwd(char *buffer, uint32_t length) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_GETCWD), "b"(buffer), "c"(length) : "memory");
+    return result;
+}
+
 int32_t mkdir(const char *path) {
     int32_t result;
 
@@ -151,5 +159,12 @@ int32_t procinfo(uint32_t index, procinfo_t *info) {
     int32_t result;
 
     __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_PROCINFO), "b"(index), "c"(info) : "memory");
+    return result;
+}
+
+int32_t getbootinfo(bootinfo_t *info) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_BOOTINFO), "b"(info) : "memory");
     return result;
 }

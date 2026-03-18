@@ -1058,6 +1058,22 @@ int32_t proc_procinfo(uint32_t index, sys_procinfo_t *info) {
     return 1;
 }
 
+int32_t proc_getcwd(char *buffer, uint32_t length) {
+    uint32_t cwd_length;
+
+    if (current_task == 0 || buffer == 0 || length == 0u) {
+        return -1;
+    }
+
+    cwd_length = string_length(current_task->cwd);
+    if ((cwd_length + 1u) > length) {
+        return -1;
+    }
+
+    string_copy(buffer, current_task->cwd, length);
+    return (int32_t)cwd_length;
+}
+
 int32_t proc_chdir(const char *path) {
     char absolute_path[PROC_PATH_MAX];
     vfs_stat_t stat;

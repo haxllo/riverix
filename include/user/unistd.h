@@ -14,6 +14,7 @@ void exit(int32_t status) __attribute__((noreturn));
 int32_t open(const char *path, uint32_t flags);
 int32_t close(int32_t fd);
 int32_t lseek(int32_t fd, int32_t offset, uint32_t whence);
+int32_t getcwd(char *buffer, uint32_t length);
 int32_t mkdir(const char *path);
 int32_t unlink(const char *path);
 int32_t chdir(const char *path);

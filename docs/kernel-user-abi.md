@@ -1,6 +1,7 @@
 # Kernel/User ABI
 
-This document records the current Riverix syscall ABI as of Phase 5. The goal is
+This document records the current Riverix syscall ABI as of the current Phase 6
+recovery-userland slice. The goal is
 stability for the existing numbers and honest documentation of the current
 semantics and limits.
 
@@ -40,6 +41,8 @@ semantics and limits.
 | 20     | `execv`  | `path`, `argv`                         | does not return on success |
 | 21     | `readdir`| `path`, `index`, `dirent_ptr`          | `0` on success, `1` at end, `-1` on error |
 | 22     | `procinfo` | `index`, `procinfo_ptr`              | `0` on success, `1` at end, `-1` on error |
+| 23     | `bootinfo` | `bootinfo_ptr`                       | `0` or `-1` |
+| 24     | `getcwd` | `buffer`, `length`                     | bytes written, excluding the trailing null, or `-1` |
 
 ## Flags and structs
 
@@ -117,6 +120,25 @@ Current task-kind values:
 - `0`: kernel task
 - `1`: user task
 
+### `sys_bootinfo_t`
+
+```c
+typedef struct sys_bootinfo {
+    uint32_t root_policy;
+    uint32_t flags;
+} sys_bootinfo_t;
+```
+
+Current boot root-policy values:
+
+- `0`: auto
+- `1`: disk
+- `2`: ramdisk
+
+Current boot flags:
+
+- `0x1`: recovery mode
+
 ## Path semantics
 
 - Absolute and relative paths are supported.
@@ -124,6 +146,7 @@ Current task-kind values:
 - `cwd` defaults to `/`.
 - `cwd` is inherited across `fork`.
 - `cwd` is preserved across `exec`.
+- `getcwd` returns the normalized current cwd string.
 - `.` and `..` are supported.
 - Duplicate `/` separators are normalized.
 
@@ -145,6 +168,8 @@ Current task-kind values:
 - `sleep` uses PIT ticks. The current kernel programs the PIT at 100 Hz.
 - Kernel entry on behalf of user tasks is treated as non-preemptible until the
   syscall or trap path finishes. User-mode execution remains timer-preemptible.
+- `bootinfo` exposes the parsed Multiboot boot mode that the kernel uses for
+  rootfs policy and recovery-mode decisions.
 
 ## Proof coverage
 
@@ -165,3 +190,10 @@ The shipped Phase 5 userland bootstrap then adds:
 - `/etc/rc-disk` on the writable disk path
 - external tools `echo`, `ls`, `cat`, `mkdir`, `rm`, and `ps`
 - simple shell stdout redirection with `>`
+
+The current Phase 6 recovery-userland slice adds:
+
+- `bootinfo` and `getcwd`
+- recovery-aware `/bin/init`
+- `/etc/rc-recovery` when `recovery=1` is present
+- user tools `/bin/bootmode` and `/bin/pwd`
