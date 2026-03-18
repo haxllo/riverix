@@ -11,6 +11,8 @@
 #define PAGE_TABLE_SPAN (PAGE_TABLE_ENTRIES * PAGE_SIZE)
 #define RECURSIVE_DIRECTORY_INDEX 1023u
 #define DIRECT_MAP_DIRECTORY_INDEX 768u
+#define MMIO_DIRECTORY_INDEX_START (KERNEL_MMIO_BASE >> 22)
+#define MMIO_DIRECTORY_INDEX_END (KERNEL_MMIO_LIMIT >> 22)
 #define HEAP_DIRECTORY_INDEX_START (KERNEL_HEAP_BASE >> 22)
 #define HEAP_DIRECTORY_INDEX_END (KERNEL_HEAP_LIMIT >> 22)
 #define STACK_DIRECTORY_INDEX_START (KERNEL_STACK_BASE >> 22)
@@ -161,6 +163,10 @@ void paging_init(void) {
     }
 
     if (paging_prepare_shared_tables(page_directory, HEAP_DIRECTORY_INDEX_START, HEAP_DIRECTORY_INDEX_END, "heap") != 0) {
+        return;
+    }
+
+    if (paging_prepare_shared_tables(page_directory, MMIO_DIRECTORY_INDEX_START, MMIO_DIRECTORY_INDEX_END, "mmio") != 0) {
         return;
     }
 

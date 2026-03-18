@@ -46,13 +46,16 @@ decoded in the trap layer, logged with fault details, converted into determinist
 exit statuses, and reaped through the normal wait path instead of panicking the whole
 system. Kernel faults still halt the machine. For storage,
 the ISO boot path still mounts a read-only `simplefs` image from a Multiboot ramdisk
-module, while the GPT/EFI disk-image boot path detects an ATA disk, parses GPT, wraps the
-`riverix-rootfs` partition as a block device, and mounts the same filesystem format
-directly from disk. On the disk path, `simplefs` is writable with on-disk inode/block
-bitmaps, contiguous extent allocation, kernel-driven file creation and truncation, and a
-boot-time persistence smoke test that updates `/var/bootcount` across reboots. The build
-produces the raw disk image using only user-space tools, which is useful in WSL because it
-avoids loop-mount and root-only image assembly steps. Phase 4 is now in place too: the
+module, while the GPT/EFI disk-image boot path now runs through a controller-aware block
+stack with explicit controller/device ownership, generic storage bootstrap, PCI config
+discovery, an MMIO mapping window, a legacy ATA PIO fallback path, and a verified AHCI
+path under QEMU. Both ATA and AHCI disk boots parse GPT, wrap the `riverix-rootfs`
+partition as a block device, and mount the same writable `simplefs` format directly from
+disk. On the disk path, `simplefs` is writable with on-disk inode/block bitmaps,
+contiguous extent allocation, kernel-driven file creation and truncation, and a boot-time
+persistence smoke test that updates `/var/bootcount` across reboots. The build produces
+the raw disk image using only user-space tools, which is useful in WSL because it avoids
+loop-mount and root-only image assembly steps. Phase 4 is now in place too: the
 syscall ABI exposes `open`, `close`, `read`, `write`, `lseek`, `mkdir`, `unlink`, `stat`,
 `chdir`, `dup`, `dup2`, `sleep`, and `ticks`, with per-process cwd handling and relative
 path resolution. The shipped `/bin/phase4` user program proves that ABI on both boot
@@ -126,6 +129,12 @@ For the raw GPT/EFI disk image:
 make run-disk
 ```
 
+For the same installed image attached through an AHCI controller:
+
+```bash
+make run-disk-ahci
+```
+
 For the recovery-first disk image:
 
 ```bash
@@ -154,6 +163,12 @@ For the raw GPT/EFI disk image:
 
 ```bash
 make check-disk
+```
+
+To verify the same installed image through the AHCI controller path:
+
+```bash
+make check-disk-ahci
 ```
 
 For the recovery disk image:
@@ -193,6 +208,10 @@ driver, GPT rootfs partition discovery, disk-backed `simplefs` mount, the same u
 process lifecycle, the writable Phase 4 filesystem/fd proof, and timer-driven scheduler
 activity.
 
+The `check-disk-ahci` target boots the same installed disk image behind QEMU's AHCI
+controller, verifies PCI discovery plus MMIO-backed AHCI bring-up, and confirms that the
+same GPT rootfs and userland path still boot cleanly without falling back to ATA.
+
 The `check-disk-recovery` target boots a recovery-first raw disk image in headless QEMU,
 verifies that GRUB loads the ramdisk rootfs from the ESP, confirms that the kernel honors
 `root=ramdisk`, confirms that `/bin/init` enters explicit recovery mode, and then runs the
@@ -228,11 +247,12 @@ See `docs/plans/2026-03-18-phase-5-userland-bootstrap.md` for the Phase 5 implem
 See `docs/plans/2026-03-19-phase-6-install-and-recovery.md` for the current Phase 6 plan.
 See `docs/plans/2026-03-19-phase-6-recovery-userland.md` for the current recovery-userland slice.
 See `docs/plans/2026-03-19-phase-6-reinstall-path.md` for the current recovery reinstall slice.
+See `docs/plans/2026-03-19-phase-7-storage-controller-path.md` for the Phase 7 storage-controller work.
 See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Start Phase 7 by separating block-controller concerns so the storage stack is not anchored to one narrow ATA PIO path.
-2. Add a broader hardware-backed disk path, ideally AHCI or another modern controller flow, while keeping ATA PIO as fallback.
-3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
-4. Expand the shell and base userland beyond the first tool set while keeping the ABI conservative.
+1. Start Phase 8 with TTY/session groundwork so the shell stops depending on a hardcoded single-console model.
+2. Add permission bits plus a basic uid/gid model before widening the shell and tool surface further.
+3. Add `pipe` and shell pipelines so the userland path starts to behave like a real Unix environment.
+4. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.

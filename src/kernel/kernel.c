@@ -7,6 +7,7 @@
 #include "kernel/kheap.h"
 #include "kernel/kstack.h"
 #include "kernel/memory.h"
+#include "kernel/mmio.h"
 #include "kernel/multiboot.h"
 #include "kernel/palloc.h"
 #include "kernel/paging.h"
@@ -86,6 +87,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     (void)kheap_selftest();
     kstack_init();
     (void)kstack_selftest();
+    mmio_init();
 
     bootinfo_init(high_multiboot_info);
     gdt_init();

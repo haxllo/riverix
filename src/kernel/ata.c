@@ -38,6 +38,7 @@ typedef struct ata_device_context {
 } ata_device_context_t;
 
 static ata_device_context_t ata0_context;
+static block_controller_t ata0_controller;
 static block_device_t ata0_device;
 static uint32_t ata_initialized;
 
@@ -221,6 +222,14 @@ int32_t ata_init(void) {
         return -1;
     }
 
+    ata0_controller.name = "ata-ctl0";
+    ata0_controller.transport = BLOCK_TRANSPORT_ATA_PIO;
+    ata0_controller.context = &ata0_context;
+    if (block_register_controller(&ata0_controller) != 0) {
+        console_write("ata: failed to register controller\n");
+        return -1;
+    }
+
     ata0_device.name = "ata0";
     ata0_device.block_size = 512u;
     ata0_device.block_count = sector_count;
@@ -228,6 +237,7 @@ int32_t ata_init(void) {
     ata0_device.read = ata_read;
     ata0_device.write = ata_write;
     ata0_device.context = &ata0_context;
+    ata0_device.controller = &ata0_controller;
     ata0_device.parent = 0;
 
     if (block_register(&ata0_device) != 0) {

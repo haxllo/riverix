@@ -185,6 +185,7 @@ int32_t partition_register_rootfs(block_device_t *disk, const char *device_name)
         rootfs_partition_device.read = partition_read;
         rootfs_partition_device.write = disk->read_only == 0u ? partition_write : 0;
         rootfs_partition_device.context = &rootfs_partition_context;
+        rootfs_partition_device.controller = disk->controller;
         rootfs_partition_device.parent = disk;
 
         if (block_register(&rootfs_partition_device) != 0) {

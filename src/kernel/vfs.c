@@ -2,7 +2,6 @@
 
 #include <stdint.h>
 
-#include "kernel/ata.h"
 #include "kernel/block.h"
 #include "kernel/bootinfo.h"
 #include "kernel/console.h"
@@ -11,6 +10,7 @@
 #include "kernel/ramdisk.h"
 #include "kernel/serial.h"
 #include "kernel/simplefs.h"
+#include "kernel/storage.h"
 
 static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t length);
 static int32_t console_inode_write(vfs_file_t *file, const char *buffer, uint32_t length);
@@ -385,33 +385,39 @@ static int32_t vfs_mount_root(vfs_inode_t **out_root, block_device_t *device) {
 }
 
 static int32_t vfs_ensure_disk_rootfs_device(block_device_t **out_device) {
-    block_device_t *ata_device;
     block_device_t *rootfs_device;
+    block_device_t *disk_device;
+    const char *partition_name;
 
     if (out_device == 0) {
         return -1;
     }
 
-    rootfs_device = block_find("ata0p2");
+    if (storage_init() != 0) {
+        return -1;
+    }
+
+    partition_name = storage_boot_partition_name();
+    if (partition_name == 0) {
+        return -1;
+    }
+
+    rootfs_device = block_find(partition_name);
     if (rootfs_device != 0) {
         *out_device = rootfs_device;
         return 0;
     }
 
-    if (ata_init() != 0) {
+    disk_device = storage_boot_disk();
+    if (disk_device == 0) {
         return -1;
     }
 
-    ata_device = block_find("ata0");
-    if (ata_device == 0) {
+    if (partition_register_rootfs(disk_device, partition_name) != 0) {
         return -1;
     }
 
-    if (partition_register_rootfs(ata_device, "ata0p2") != 0) {
-        return -1;
-    }
-
-    rootfs_device = block_find("ata0p2");
+    rootfs_device = block_find(partition_name);
     if (rootfs_device == 0) {
         return -1;
     }

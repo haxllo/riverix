@@ -6,7 +6,7 @@
 
 **Architecture:** Keep building vertically through stable interfaces instead of adding isolated demos. The kernel should grow in layers: boot and VM, block and filesystem, process and syscall model, userland, installability, then broader hardware and networking. Each phase should leave behind real interfaces and tests, not throwaway scaffolding, and each phase may be refined as we learn more from runtime behavior.
 
-**Tech Stack:** freestanding C, x86, Multiboot, GRUB, QEMU, OVMF, GPT, simplefs, ATA PIO, WSL-hosted Unix toolchain
+**Tech Stack:** freestanding C, x86, Multiboot, GRUB, QEMU, OVMF, GPT, simplefs, ATA PIO, PCI, AHCI, WSL-hosted Unix toolchain
 
 ---
 
@@ -24,7 +24,7 @@ The repository already has:
 - ELF loading for `/bin/init`
 - a read-only `simplefs`
 - ISO boot with ramdisk fallback
-- GPT/EFI raw disk image boot with ATA-backed rootfs partition
+- GPT/EFI raw disk image boot with ATA-backed and AHCI-backed rootfs paths
 
 That is enough to stop doing pure bring-up and start building a coherent operating system.
 

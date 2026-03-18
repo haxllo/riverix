@@ -9,6 +9,15 @@
 Both images use the same layout and filesystem contents. The only difference is the
 default GRUB configuration copied into the EFI System Partition.
 
+The installed image can now be booted through either of the currently supported disk
+controller paths:
+
+- legacy IDE/ATA PIO with `make run-disk`
+- QEMU AHCI with `make run-disk-ahci`
+
+Both controller paths are expected to find the same GPT partition map and mount the same
+`simplefs` rootfs.
+
 ## Partition map
 
 1. EFI System Partition
@@ -109,12 +118,14 @@ make install-image OUTPUT=/tmp/riverix-reinstall.img INSTALL_GRUB_CONFIG=grub/gr
 
 ```bash
 make check-disk
+make check-disk-ahci
 make check-disk-recovery
 make check-disk-reinstall
 make check-disk-persist
 ```
 
 - `check-disk` proves disk-root boot from the installed image
+- `check-disk-ahci` proves the same installed image boots through the PCI/MMIO/AHCI path
 - `check-disk-recovery` proves ramdisk-root recovery boot from a disk image
 - `check-disk-reinstall` proves recovery mode can restore the installed disk rootfs from the ESP-backed ramdisk payload
 - `check-disk-persist` proves the writable rootfs survives reboot

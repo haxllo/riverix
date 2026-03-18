@@ -20,6 +20,7 @@ KERNEL := $(BUILD_DIR)/kernel.elf
 ISO := $(BUILD_DIR)/riverix.iso
 LOG := $(BUILD_DIR)/qemu.log
 DISK_LOG := $(BUILD_DIR)/qemu-disk.log
+DISK_AHCI_LOG := $(BUILD_DIR)/qemu-disk-ahci.log
 DISK_RECOVERY_LOG := $(BUILD_DIR)/qemu-disk-recovery.log
 DISK_REINSTALL_LOG1 := $(BUILD_DIR)/qemu-disk-reinstall-pass1.log
 DISK_REINSTALL_LOG2 := $(BUILD_DIR)/qemu-disk-reinstall-pass2.log
@@ -63,6 +64,7 @@ ROOTFS_PARTITION_LABEL := riverix-rootfs
 ESP_LABEL := RIVERIX
 GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile serial terminal
 INSTALL_GRUB_CONFIG ?= grub/grub-disk.cfg
+QEMU_AHCI_DISK_ARGS := -device ahci,id=ahci0 -drive id=disk0,if=none,format=raw,file=$(DISK_IMAGE) -device ide-hd,drive=disk0,bus=ahci0.0
 
 CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Wextra -Werror -Iinclude
 ASFLAGS := -m32 -Iinclude
@@ -73,6 +75,7 @@ HOSTCFLAGS := -std=gnu11 -Wall -Wextra -Werror -Iinclude
 OBJS := \
 	$(BUILD_DIR)/boot.o \
 	$(BUILD_DIR)/block.o \
+	$(BUILD_DIR)/ahci.o \
 	$(BUILD_DIR)/ata.o \
 	$(BUILD_DIR)/bootinfo.o \
 	$(BUILD_DIR)/kernel.o \
@@ -84,6 +87,8 @@ OBJS := \
 		$(BUILD_DIR)/kheap.o \
 		$(BUILD_DIR)/kstack.o \
 		$(BUILD_DIR)/memory.o \
+	$(BUILD_DIR)/mmio.o \
+	$(BUILD_DIR)/pci.o \
 	$(BUILD_DIR)/pic.o \
 	$(BUILD_DIR)/palloc.o \
 	$(BUILD_DIR)/paging.o \
@@ -93,12 +98,13 @@ OBJS := \
 	$(BUILD_DIR)/ramdisk.o \
 	$(BUILD_DIR)/serial.o \
 	$(BUILD_DIR)/simplefs.o \
+	$(BUILD_DIR)/storage.o \
 	$(BUILD_DIR)/syscall.o \
 	$(BUILD_DIR)/usercopy.o \
 	$(BUILD_DIR)/vfs.o \
 	$(BUILD_DIR)/vga.o
 
-.PHONY: all clean run check disk-image recovery-disk-image reinstall-disk-image install-image run-disk run-disk-recovery run-disk-reinstall check-disk check-disk-recovery check-disk-reinstall check-disk-persist
+.PHONY: all clean run check disk-image recovery-disk-image reinstall-disk-image install-image run-disk run-disk-ahci run-disk-recovery run-disk-reinstall check-disk check-disk-ahci check-disk-recovery check-disk-reinstall check-disk-persist
 
 all: $(ISO)
 
@@ -115,6 +121,9 @@ $(BUILD_DIR)/console.o: src/kernel/console.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/block.o: src/kernel/block.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/ahci.o: src/kernel/ahci.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/ata.o: src/kernel/ata.c | $(BUILD_DIR)
@@ -144,6 +153,12 @@ $(BUILD_DIR)/kstack.o: src/kernel/kstack.c | $(BUILD_DIR)
 $(BUILD_DIR)/memory.o: src/kernel/memory.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/mmio.o: src/kernel/mmio.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/pci.o: src/kernel/pci.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/pic.o: src/kernel/pic.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -166,6 +181,9 @@ $(BUILD_DIR)/serial.o: src/kernel/serial.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/simplefs.o: src/kernel/simplefs.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/storage.o: src/kernel/storage.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/syscall.o: src/kernel/syscall.c | $(BUILD_DIR)
@@ -257,6 +275,10 @@ run-disk: $(DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
+run-disk-ahci: $(DISK_IMAGE) | $(BUILD_DIR)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) $(QEMU_AHCI_DISK_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+
 run-disk-recovery: $(RECOVERY_DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
@@ -345,9 +367,11 @@ check-disk: | $(BUILD_DIR)
 	grep -q "kstack: ready slots 0x" $(DISK_LOG)
 	grep -q "kstack: selftest ok" $(DISK_LOG)
 	grep -q "vfs: root policy disk" $(DISK_LOG)
-	grep -q "block: registered ata0 blocks 0x" $(DISK_LOG)
+	grep -q "block: controller ata-ctl0 transport ata-pio" $(DISK_LOG)
+	grep -q "block: registered ata0 via ata-ctl0 blocks 0x" $(DISK_LOG)
 	grep -q "ata: detected ata0 sectors 0x" $(DISK_LOG)
-	grep -q "block: registered ata0p2 blocks 0x" $(DISK_LOG)
+	grep -q "storage: boot disk ata0" $(DISK_LOG)
+	grep -q "block: registered ata0p2 via ata-ctl0 blocks 0x" $(DISK_LOG)
 	grep -q "partition: registered ata0p2 start 0x" $(DISK_LOG)
 	grep -q "simplefs: mounted ata0p2 inodes 0x" $(DISK_LOG)
 	grep -q "vfs: rootfs mounted from disk" $(DISK_LOG)
@@ -395,6 +419,31 @@ check-disk: | $(BUILD_DIR)
 	grep -q "pit: tick" $(DISK_LOG)
 	! grep -q "ramdisk: rootfs module bytes 0x" $(DISK_LOG)
 	@printf 'check passed: %s\n' "$(DISK_LOG)"
+
+check-disk-ahci: | $(BUILD_DIR)
+	rm -f $(DISK_IMAGE)
+	$(MAKE) $(DISK_IMAGE)
+	rm -f $(DISK_AHCI_LOG)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) $(QEMU_AHCI_DISK_ARGS) -serial file:$(DISK_AHCI_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	grep -q "riverix: kernel_main reached" $(DISK_AHCI_LOG)
+	grep -q "vfs: root policy disk" $(DISK_AHCI_LOG)
+	grep -q "pci: config io ready" $(DISK_AHCI_LOG)
+	grep -q "pci: found class 0x00010601" $(DISK_AHCI_LOG)
+	grep -q "mmio: mapped phys 0x" $(DISK_AHCI_LOG)
+	grep -q "block: controller ahci-ctl0 transport ahci" $(DISK_AHCI_LOG)
+	grep -q "block: registered ahci0 via ahci-ctl0 blocks 0x" $(DISK_AHCI_LOG)
+	grep -q "ahci: detected ahci0 port 0x" $(DISK_AHCI_LOG)
+	grep -q "storage: boot disk ahci0" $(DISK_AHCI_LOG)
+	grep -q "block: registered ahci0p2 via ahci-ctl0 blocks 0x" $(DISK_AHCI_LOG)
+	grep -q "partition: registered ahci0p2 start 0x" $(DISK_AHCI_LOG)
+	grep -q "simplefs: mounted ahci0p2 inodes 0x" $(DISK_AHCI_LOG)
+	grep -q "vfs: rootfs mounted from disk" $(DISK_AHCI_LOG)
+	grep -q "storage: bootcount 0x00000001" $(DISK_AHCI_LOG)
+	grep -q "init: selftest exit 0x00000000" $(DISK_AHCI_LOG)
+	grep -q "phase5: disk done" $(DISK_AHCI_LOG)
+	! grep -q "ata: detected ata0" $(DISK_AHCI_LOG)
+	@printf 'check passed: %s\n' "$(DISK_AHCI_LOG)"
 
 check-disk-recovery: | $(BUILD_DIR)
 	rm -f $(RECOVERY_DISK_IMAGE)
