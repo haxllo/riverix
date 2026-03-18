@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Keep this file LF-terminated so it executes correctly from WSL checkouts on /mnt/*.
+
 usage() {
     cat >&2 <<'EOF'
 usage:
