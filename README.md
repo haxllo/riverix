@@ -59,9 +59,15 @@ path resolution. The shipped `/bin/phase4` user program proves that ABI on both 
 paths: on the ISO path it exercises read-only pathname and timing calls and emits a clear
 write-skip marker, while on the disk path it creates files under `/var`, reads them back,
 redirects output through `dup2`, unlinks files, removes an empty directory, and confirms
-that those writes survive the persistence test. The current `/bin/init` remains a proof
-harness rather than a long-lived system init; after running the Phase 1 through Phase 4
-checks, it exits cleanly and the kernel continues on worker threads and idle.
+that those writes survive the persistence test. Phase 5 is now in place too: the old
+assembly `/bin/init` proof harness has been preserved as `/bin/selftest`, while a new C
+`/bin/init` runs that selftest, launches `/bin/sh` on a startup script, and then hands
+off to an interactive serial shell. The repository now has a small freestanding C
+userland runtime, mixed assembly/C user builds, line-buffered `/dev/console` input over
+COM1, `execv` with `argc`/`argv` stack setup, and the first real user tools: `echo`,
+`ls`, `cat`, `mkdir`, `rm`, and `ps`. The ISO path runs `/etc/rc-ro`, while the disk
+path runs `/etc/rc-disk`, which exercises external command launch plus simple stdout
+redirection before the system settles into the interactive shell prompt.
 
 ## Why this shape
 
@@ -156,11 +162,12 @@ See `references/README.md` for the downloaded source material that guides the de
 See `docs/plans/2026-03-16-riverix-system-roadmap.md` for the current end-to-end roadmap.
 See `docs/plans/2026-03-16-phase-3-completion.md` for the Phase 3 completion breakdown.
 See `docs/plans/2026-03-18-phase-4-abi-growth.md` for the Phase 4 implementation plan.
+See `docs/plans/2026-03-18-phase-5-userland-bootstrap.md` for the Phase 5 implementation plan.
 See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Start Phase 5 userland bootstrap with a tiny libc/syscall wrapper layer and real core tools.
-2. Expand the process/user ABI beyond the current proof floor: `argv`, `envp`, and a less synthetic init path.
+1. Start Phase 6 install and persistence tooling around the new shell/bootstrap path instead of only raw QEMU images.
+2. Expand the shell and base userland beyond the first tool set while keeping the ABI conservative.
 3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
 4. Replace the narrow ATA PIO path with a broader disk stack that can grow into PCI/AHCI or NVMe.

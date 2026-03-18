@@ -9,8 +9,9 @@
 #define ROOTFS_BIN_INODE 1u
 #define ROOTFS_DEV_INODE 2u
 #define ROOTFS_VAR_INODE 3u
-#define ROOTFS_FIRST_FILE_INODE 4u
-#define ROOTFS_ROOT_CHILD_COUNT 3u
+#define ROOTFS_ETC_INODE 4u
+#define ROOTFS_FIRST_FILE_INODE 5u
+#define ROOTFS_ROOT_CHILD_COUNT 4u
 #define ROOTFS_MAX_BIN_FILES (ROOTFS_TOTAL_INODES - ROOTFS_FIRST_FILE_INODE)
 #define ROOTFS_DEFAULT_TOTAL_BLOCKS 32768u
 
@@ -18,6 +19,7 @@ typedef struct rootfs_input_file {
     const char *host_path;
     const char *image_path;
     const char *name;
+    uint32_t parent_inode_index;
     uint8_t *bytes;
     uint32_t length;
     uint32_t inode_index;
@@ -147,12 +149,26 @@ static int parse_total_blocks(const char *text, uint32_t *out_total_blocks) {
     return 0;
 }
 
-static const char *rootfs_bin_name(const char *path) {
-    static const char prefix[] = "/bin/";
-    const uint32_t prefix_length = (uint32_t)(sizeof(prefix) - 1u);
+static const char *rootfs_image_leaf(const char *path, uint32_t *out_parent_inode) {
+    static const char bin_prefix[] = "/bin/";
+    static const char etc_prefix[] = "/etc/";
+    const char *prefix = NULL;
+    uint32_t prefix_length = 0u;
     uint32_t index;
 
-    if (path == NULL) {
+    if (path == NULL || out_parent_inode == NULL) {
+        return NULL;
+    }
+
+    if (path[0] == '/' && path[1] == 'b' && path[2] == 'i' && path[3] == 'n' && path[4] == '/') {
+        prefix = bin_prefix;
+        prefix_length = (uint32_t)(sizeof(bin_prefix) - 1u);
+        *out_parent_inode = ROOTFS_BIN_INODE;
+    } else if (path[0] == '/' && path[1] == 'e' && path[2] == 't' && path[3] == 'c' && path[4] == '/') {
+        prefix = etc_prefix;
+        prefix_length = (uint32_t)(sizeof(etc_prefix) - 1u);
+        *out_parent_inode = ROOTFS_ETC_INODE;
+    } else {
         return NULL;
     }
 
@@ -199,12 +215,15 @@ int main(int argc, char **argv) {
     simplefs_inode_disk_t inodes[ROOTFS_TOTAL_INODES];
     simplefs_dir_entry_disk_t root_entries[ROOTFS_ROOT_CHILD_COUNT];
     simplefs_dir_entry_disk_t *bin_entries = NULL;
+    simplefs_dir_entry_disk_t *etc_entries = NULL;
     rootfs_input_file_t *files = NULL;
     uint8_t *image = NULL;
     uint8_t *inode_bitmap;
     uint8_t *block_bitmap;
     uint32_t total_blocks = ROOTFS_DEFAULT_TOTAL_BLOCKS;
     uint32_t file_count;
+    uint32_t bin_file_count = 0u;
+    uint32_t etc_file_count = 0u;
     uint32_t used_inode_count;
     uint32_t inode_table_blocks;
     uint32_t inode_bitmap_blocks;
@@ -213,6 +232,8 @@ int main(int argc, char **argv) {
     uint32_t root_dir_block;
     uint32_t bin_dir_block;
     uint32_t bin_dir_blocks;
+    uint32_t etc_dir_block;
+    uint32_t etc_dir_blocks;
     uint32_t next_data_block;
     uint32_t image_length;
     uint32_t index;
@@ -241,6 +262,7 @@ int main(int argc, char **argv) {
         files[0].host_path = argv[2];
         files[0].image_path = "/bin/init";
         files[0].name = "init";
+        files[0].parent_inode_index = ROOTFS_BIN_INODE;
     } else {
         if (parse_total_blocks(argv[2], &total_blocks) != 0) {
             print_usage(argv[0]);
@@ -264,9 +286,9 @@ int main(int argc, char **argv) {
 
             files[index].host_path = argv[argument_index++];
             files[index].image_path = argv[argument_index++];
-            name = rootfs_bin_name(files[index].image_path);
+            name = rootfs_image_leaf(files[index].image_path, &files[index].parent_inode_index);
             if (name == NULL) {
-                fprintf(stderr, "only /bin/<name> images are supported: %s\n", files[index].image_path);
+                fprintf(stderr, "only /bin/<name> or /etc/<name> images are supported: %s\n", files[index].image_path);
                 goto cleanup;
             }
 
@@ -278,8 +300,9 @@ int main(int argc, char **argv) {
         uint32_t other_index;
 
         for (other_index = 0u; other_index < index; other_index++) {
-            if (strings_equal(files[index].name, files[other_index].name)) {
-                fprintf(stderr, "duplicate /bin entry: %s\n", files[index].name);
+            if (files[index].parent_inode_index == files[other_index].parent_inode_index &&
+                strings_equal(files[index].name, files[other_index].name)) {
+                fprintf(stderr, "duplicate rootfs entry: %s\n", files[index].name);
                 goto cleanup;
             }
         }
@@ -294,6 +317,11 @@ int main(int argc, char **argv) {
 
         files[index].inode_index = ROOTFS_FIRST_FILE_INODE + index;
         files[index].block_count = align_up(files[index].length, SIMPLEFS_BLOCK_SIZE) / SIMPLEFS_BLOCK_SIZE;
+        if (files[index].parent_inode_index == ROOTFS_BIN_INODE) {
+            bin_file_count++;
+        } else if (files[index].parent_inode_index == ROOTFS_ETC_INODE) {
+            etc_file_count++;
+        }
     }
 
     used_inode_count = ROOTFS_FIRST_FILE_INODE + file_count;
@@ -301,7 +329,10 @@ int main(int argc, char **argv) {
     inode_bitmap_blocks = 1u;
     block_bitmap_bytes = align_up(total_blocks, 8u) / 8u;
     block_bitmap_blocks = align_up(block_bitmap_bytes, SIMPLEFS_BLOCK_SIZE) / SIMPLEFS_BLOCK_SIZE;
-    bin_dir_blocks = align_up(file_count * sizeof(simplefs_dir_entry_disk_t), SIMPLEFS_BLOCK_SIZE) / SIMPLEFS_BLOCK_SIZE;
+    bin_dir_blocks = bin_file_count == 0u ? 0u :
+        align_up(bin_file_count * sizeof(simplefs_dir_entry_disk_t), SIMPLEFS_BLOCK_SIZE) / SIMPLEFS_BLOCK_SIZE;
+    etc_dir_blocks = etc_file_count == 0u ? 0u :
+        align_up(etc_file_count * sizeof(simplefs_dir_entry_disk_t), SIMPLEFS_BLOCK_SIZE) / SIMPLEFS_BLOCK_SIZE;
 
     zero_bytes(&superblock, sizeof(superblock));
     superblock.magic = SIMPLEFS_MAGIC;
@@ -320,7 +351,8 @@ int main(int argc, char **argv) {
 
     root_dir_block = superblock.data_block_start;
     bin_dir_block = root_dir_block + 1u;
-    next_data_block = bin_dir_block + bin_dir_blocks;
+    etc_dir_block = bin_dir_block + bin_dir_blocks;
+    next_data_block = etc_dir_block + etc_dir_blocks;
 
     for (index = 0u; index < file_count; index++) {
         files[index].data_block = next_data_block;
@@ -343,6 +375,11 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
+    etc_entries = (simplefs_dir_entry_disk_t *)calloc(file_count, sizeof(*etc_entries));
+    if (etc_entries == NULL) {
+        goto cleanup;
+    }
+
     zero_bytes(image, image_length);
     zero_bytes(inodes, sizeof(inodes));
     zero_bytes(root_entries, sizeof(root_entries));
@@ -354,13 +391,18 @@ int main(int argc, char **argv) {
     inodes[ROOTFS_ROOT_INODE].child_count = ROOTFS_ROOT_CHILD_COUNT;
 
     inodes[ROOTFS_BIN_INODE].kind = SIMPLEFS_INODE_DIR;
-    inodes[ROOTFS_BIN_INODE].size = file_count * sizeof(simplefs_dir_entry_disk_t);
+    inodes[ROOTFS_BIN_INODE].size = bin_file_count * sizeof(simplefs_dir_entry_disk_t);
     inodes[ROOTFS_BIN_INODE].data_block = bin_dir_block;
     inodes[ROOTFS_BIN_INODE].block_count = bin_dir_blocks;
-    inodes[ROOTFS_BIN_INODE].child_count = file_count;
+    inodes[ROOTFS_BIN_INODE].child_count = bin_file_count;
 
     inodes[ROOTFS_DEV_INODE].kind = SIMPLEFS_INODE_DIR;
     inodes[ROOTFS_VAR_INODE].kind = SIMPLEFS_INODE_DIR;
+    inodes[ROOTFS_ETC_INODE].kind = SIMPLEFS_INODE_DIR;
+    inodes[ROOTFS_ETC_INODE].size = etc_file_count * sizeof(simplefs_dir_entry_disk_t);
+    inodes[ROOTFS_ETC_INODE].data_block = etc_dir_blocks == 0u ? 0u : etc_dir_block;
+    inodes[ROOTFS_ETC_INODE].block_count = etc_dir_blocks;
+    inodes[ROOTFS_ETC_INODE].child_count = etc_file_count;
 
     root_entries[0].inode_index = ROOTFS_BIN_INODE;
     copy_bytes(root_entries[0].name, "bin", 3u);
@@ -368,7 +410,11 @@ int main(int argc, char **argv) {
     copy_bytes(root_entries[1].name, "dev", 3u);
     root_entries[2].inode_index = ROOTFS_VAR_INODE;
     copy_bytes(root_entries[2].name, "var", 3u);
+    root_entries[3].inode_index = ROOTFS_ETC_INODE;
+    copy_bytes(root_entries[3].name, "etc", 3u);
 
+    bin_file_count = 0u;
+    etc_file_count = 0u;
     for (index = 0u; index < file_count; index++) {
         const uint32_t name_length = string_length(files[index].name);
 
@@ -377,8 +423,15 @@ int main(int argc, char **argv) {
         inodes[files[index].inode_index].data_block = files[index].data_block;
         inodes[files[index].inode_index].block_count = files[index].block_count;
 
-        bin_entries[index].inode_index = files[index].inode_index;
-        copy_bytes(bin_entries[index].name, files[index].name, name_length);
+        if (files[index].parent_inode_index == ROOTFS_BIN_INODE) {
+            bin_entries[bin_file_count].inode_index = files[index].inode_index;
+            copy_bytes(bin_entries[bin_file_count].name, files[index].name, name_length);
+            bin_file_count++;
+        } else {
+            etc_entries[etc_file_count].inode_index = files[index].inode_index;
+            copy_bytes(etc_entries[etc_file_count].name, files[index].name, name_length);
+            etc_file_count++;
+        }
     }
 
     inode_bitmap = &image[superblock.inode_bitmap_start * SIMPLEFS_BLOCK_SIZE];
@@ -396,6 +449,9 @@ int main(int argc, char **argv) {
     for (index = 0u; index < bin_dir_blocks; index++) {
         bitmap_mark(block_bitmap, bin_dir_block + index);
     }
+    for (index = 0u; index < etc_dir_blocks; index++) {
+        bitmap_mark(block_bitmap, etc_dir_block + index);
+    }
 
     for (index = 0u; index < file_count; index++) {
         uint32_t block_index;
@@ -408,7 +464,12 @@ int main(int argc, char **argv) {
     copy_bytes(image, &superblock, sizeof(superblock));
     copy_bytes(&image[superblock.inode_table_start * SIMPLEFS_BLOCK_SIZE], inodes, sizeof(inodes));
     copy_bytes(&image[root_dir_block * SIMPLEFS_BLOCK_SIZE], root_entries, sizeof(root_entries));
-    copy_bytes(&image[bin_dir_block * SIMPLEFS_BLOCK_SIZE], bin_entries, file_count * sizeof(*bin_entries));
+    if (bin_dir_blocks != 0u) {
+        copy_bytes(&image[bin_dir_block * SIMPLEFS_BLOCK_SIZE], bin_entries, bin_file_count * sizeof(*bin_entries));
+    }
+    if (etc_dir_blocks != 0u) {
+        copy_bytes(&image[etc_dir_block * SIMPLEFS_BLOCK_SIZE], etc_entries, etc_file_count * sizeof(*etc_entries));
+    }
 
     for (index = 0u; index < file_count; index++) {
         copy_bytes(&image[files[index].data_block * SIMPLEFS_BLOCK_SIZE], files[index].bytes, files[index].length);
@@ -422,6 +483,7 @@ int main(int argc, char **argv) {
     exit_code = 0;
 
 cleanup:
+    free(etc_entries);
     free(bin_entries);
     free(image);
     free_input_files(files, file_count);

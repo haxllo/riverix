@@ -1,0 +1,15 @@
+# riverix phase 5 bootstrap on the writable disk path
+echo phase5: shell script disk
+cat /etc/motd
+echo phase5: ls begin
+ls /bin
+echo phase5: ls end
+echo phase5: ps begin
+ps
+echo phase5: ps end
+mkdir /var/phase5-dir
+echo phase5-disk > /var/phase5-dir/note
+cat /var/phase5-dir/note
+rm /var/phase5-dir/note
+rm /var/phase5-dir
+echo phase5: disk done

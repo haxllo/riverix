@@ -1,0 +1,10 @@
+# riverix phase 5 bootstrap on the read-only path
+echo phase5: shell script ro
+cat /etc/motd
+echo phase5: ls begin
+ls /bin
+echo phase5: ls end
+echo phase5: ps begin
+ps
+echo phase5: ps end
+echo phase5: ro done

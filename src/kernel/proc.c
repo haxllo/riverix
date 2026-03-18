@@ -41,7 +41,7 @@ typedef struct task {
     uint32_t page_directory_phys;
     kernel_stack_t kstack;
     exec_image_t image;
-    const char *name;
+    char name[SYS_NAME_MAX];
     task_entry_t entry;
     void *arg;
     uint32_t run_ticks;
@@ -100,7 +100,7 @@ static void task_reset(task_t *task) {
     task->kstack.stack_base = 0u;
     task->kstack.stack_top = 0u;
     task_reset_image(&task->image);
-    task->name = 0;
+    task->name[0] = '\0';
     task->entry = 0;
     task->arg = 0;
     task->run_ticks = 0u;
@@ -260,6 +260,33 @@ static void string_copy(char *destination, const char *source, uint32_t max_leng
     }
 
     destination[index] = '\0';
+}
+
+static const char *path_basename(const char *path) {
+    const char *cursor = path;
+    const char *last = path;
+
+    if (path == 0 || path[0] == '\0') {
+        return "";
+    }
+
+    while (*cursor != '\0') {
+        if (*cursor == '/' && cursor[1] != '\0') {
+            last = cursor + 1;
+        }
+
+        cursor++;
+    }
+
+    return last;
+}
+
+static void task_set_name(task_t *task, const char *name) {
+    if (task == 0) {
+        return;
+    }
+
+    string_copy(task->name, name != 0 ? name : "", sizeof(task->name));
 }
 
 static void write_hex32_to_fd(uint32_t fd, uint32_t value) {
@@ -432,6 +459,25 @@ static int proc_normalize_path(const task_t *task, const char *path, char *absol
     return 0;
 }
 
+static int task_load_user_image(task_t *task, const char *path, const char *const *argv, uint32_t argc) {
+    if (task == 0 || path == 0) {
+        return -1;
+    }
+
+    if (exec_load_path(task->page_directory_phys, path, &task->image) != 0) {
+        return -1;
+    }
+
+    if (exec_prepare_stack(task->page_directory_phys, &task->image, argv, argc) != 0) {
+        exec_release_image(task->page_directory_phys, &task->image);
+        task_reset_image(&task->image);
+        return -1;
+    }
+
+    task_set_name(task, path_basename(path));
+    return 0;
+}
+
 static task_t *proc_create_kernel_task(const char *name, task_entry_t entry, void *arg) {
     interrupt_frame_t *frame;
     task_t *task = task_find_unused();
@@ -458,7 +504,7 @@ static task_t *proc_create_kernel_task(const char *name, task_entry_t entry, voi
     task->kind = TASK_KERNEL;
     task->page_directory_phys = paging_page_directory_phys();
     task->saved_esp = (uint32_t)(uintptr_t)frame;
-    task->name = name;
+    task_set_name(task, name);
     task->entry = entry;
     task->arg = arg;
     task->pid = next_pid++;
@@ -466,7 +512,8 @@ static task_t *proc_create_kernel_task(const char *name, task_entry_t entry, voi
     return task;
 }
 
-static task_t *proc_create_user_task(const char *name, const char *path) {
+static task_t *proc_create_user_task(const char *path) {
+    const char *argv[1];
     interrupt_user_frame_t *frame;
     task_t *task = task_find_unused();
 
@@ -494,7 +541,8 @@ static task_t *proc_create_user_task(const char *name, const char *path) {
         return 0;
     }
 
-    if (exec_load_path(task->page_directory_phys, path, &task->image) != 0) {
+    argv[0] = path_basename(path);
+    if (task_load_user_image(task, path, argv, 1u) != 0) {
         task_release_resources(task);
         return 0;
     }
@@ -503,12 +551,11 @@ static task_t *proc_create_user_task(const char *name, const char *path) {
     task_prepare_user_frame(frame, task->image.entry_point, task->image.stack_top);
     task->kind = TASK_USER;
     task->saved_esp = (uint32_t)(uintptr_t)frame;
-    task->name = name;
     task->pid = next_pid++;
     task->state = TASK_RUNNABLE;
 
     console_write("task: ");
-    console_write(name);
+    console_write(task->name);
     console_write(" as 0x");
     console_write_hex32(task->page_directory_phys);
     console_write("\n");
@@ -614,13 +661,13 @@ static void proc_log_switch(const task_t *from, const task_t *to) {
     last_logged_tick = pit_ticks();
 
     console_write("sched: switch ");
-    if (from != 0) {
+    if (from != 0 && from->name[0] != '\0') {
         console_write(from->name);
     } else {
         console_write("bootstrap");
     }
     console_write(" -> ");
-    console_write(to->name);
+    console_write(to->name[0] != '\0' ? to->name : "unnamed");
     console_write("\n");
 }
 
@@ -788,7 +835,7 @@ void proc_init(void) {
 }
 
 void proc_start_boot_tasks(void) {
-    init_task = proc_create_user_task("init", "/bin/init");
+    init_task = proc_create_user_task("/bin/init");
     (void)proc_create_kernel_task("worker-a", worker_entry, "worker-a");
     (void)proc_create_kernel_task("worker-b", worker_entry, "worker-b");
 }
@@ -959,6 +1006,58 @@ int32_t proc_stat(const char *path, vfs_stat_t *stat) {
     return vfs_stat_path(absolute_path, stat);
 }
 
+int32_t proc_readdir(const char *path, uint32_t index, sys_dirent_t *entry) {
+    char absolute_path[PROC_PATH_MAX];
+    vfs_dirent_info_t kernel_entry;
+    int32_t result;
+
+    if (current_task == 0 || path == 0 || entry == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
+        return -1;
+    }
+
+    result = vfs_readdir_path(absolute_path, index, &kernel_entry);
+    if (result != 0) {
+        return result;
+    }
+
+    entry->kind = kernel_entry.kind;
+    entry->size = kernel_entry.size;
+    string_copy(entry->name, kernel_entry.name, sizeof(entry->name));
+    return 0;
+}
+
+int32_t proc_procinfo(uint32_t index, sys_procinfo_t *info) {
+    uint32_t slot;
+    uint32_t seen = 0u;
+
+    if (info == 0) {
+        return -1;
+    }
+
+    for (slot = 0u; slot < MAX_TASKS; slot++) {
+        task_t *task = &tasks[slot];
+
+        if (task->state == TASK_UNUSED) {
+            continue;
+        }
+
+        if (seen != index) {
+            seen++;
+            continue;
+        }
+
+        info->pid = task->pid;
+        info->parent_pid = task->parent_pid;
+        info->state = (uint32_t)task->state;
+        info->kind = (uint32_t)task->kind;
+        info->run_ticks = task->run_ticks;
+        string_copy(info->name, task->name, sizeof(info->name));
+        return 0;
+    }
+
+    return 1;
+}
+
 int32_t proc_chdir(const char *path) {
     char absolute_path[PROC_PATH_MAX];
     vfs_stat_t stat;
@@ -1013,6 +1112,61 @@ int32_t proc_dup2(uint32_t oldfd, uint32_t newfd) {
     return (int32_t)newfd;
 }
 
+static int proc_copy_exec_args(const char *default_argv0,
+                               uint32_t argv_user,
+                               const char **argv,
+                               char arg_storage[EXEC_MAX_ARGS][EXEC_ARG_MAX],
+                               uint32_t *argc_out) {
+    uint32_t index = 0u;
+
+    if (argv == 0 || argc_out == 0) {
+        return -1;
+    }
+
+    if (argv_user != 0u) {
+        for (index = 0u; index < EXEC_MAX_ARGS; index++) {
+            uint32_t arg_address = 0u;
+
+            if (user_copy_from_in(current_task->page_directory_phys,
+                                  &arg_address,
+                                  argv_user + (index * sizeof(uint32_t)),
+                                  sizeof(uint32_t)) != 0) {
+                return -1;
+            }
+
+            if (arg_address == 0u) {
+                break;
+            }
+
+            if (user_copy_string_from_in(current_task->page_directory_phys, arg_storage[index], arg_address, EXEC_ARG_MAX) != 0) {
+                return -1;
+            }
+
+            argv[index] = arg_storage[index];
+        }
+
+        if (index == EXEC_MAX_ARGS) {
+            uint32_t terminator = 0u;
+
+            if (user_copy_from_in(current_task->page_directory_phys,
+                                  &terminator,
+                                  argv_user + (index * sizeof(uint32_t)),
+                                  sizeof(uint32_t)) != 0 ||
+                terminator != 0u) {
+                return -1;
+            }
+        }
+    }
+
+    if (index == 0u) {
+        argv[0] = default_argv0;
+        index = 1u;
+    }
+
+    *argc_out = index;
+    return 0;
+}
+
 uint32_t proc_sys_exit(interrupt_frame_t *frame, int32_t status) {
     if (current_task == 0) {
         return (uint32_t)(uintptr_t)frame;
@@ -1064,7 +1218,15 @@ uint32_t proc_sys_waitpid(interrupt_frame_t *frame, int32_t pid, uint32_t status
 }
 
 uint32_t proc_sys_exec(interrupt_frame_t *frame, uint32_t path_user) {
+    return proc_sys_execv(frame, path_user, 0u);
+}
+
+uint32_t proc_sys_execv(interrupt_frame_t *frame, uint32_t path_user, uint32_t argv_user) {
     char path[PROC_PATH_MAX];
+    char absolute_path[PROC_PATH_MAX];
+    char arg_storage[EXEC_MAX_ARGS][EXEC_ARG_MAX];
+    const char *argv[EXEC_MAX_ARGS];
+    uint32_t argc = 0u;
     exec_image_t old_image;
     exec_image_t new_image;
     interrupt_user_frame_t *new_frame;
@@ -1076,7 +1238,15 @@ uint32_t proc_sys_exec(interrupt_frame_t *frame, uint32_t path_user) {
         return (uint32_t)(uintptr_t)frame;
     }
 
+    task_reset_image(&new_image);
+
     if (user_copy_string_from(path, path_user, sizeof(path)) != 0) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    if (proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0 ||
+        proc_copy_exec_args(path_basename(absolute_path), argv_user, argv, arg_storage, &argc) != 0) {
         frame->eax = (uint32_t)-1;
         return (uint32_t)(uintptr_t)frame;
     }
@@ -1087,7 +1257,9 @@ uint32_t proc_sys_exec(interrupt_frame_t *frame, uint32_t path_user) {
         return (uint32_t)(uintptr_t)frame;
     }
 
-    if (exec_load_path(new_directory, path, &new_image) != 0) {
+    if (exec_load_path(new_directory, absolute_path, &new_image) != 0 ||
+        exec_prepare_stack(new_directory, &new_image, argv, argc) != 0) {
+        exec_release_image(new_directory, &new_image);
         paging_destroy_address_space(new_directory);
         frame->eax = (uint32_t)-1;
         return (uint32_t)(uintptr_t)frame;
@@ -1098,6 +1270,7 @@ uint32_t proc_sys_exec(interrupt_frame_t *frame, uint32_t path_user) {
 
     current_task->page_directory_phys = new_directory;
     current_task->image = new_image;
+    task_set_name(current_task, path_basename(absolute_path));
     new_frame = (interrupt_user_frame_t *)(current_task->kstack.stack_top - sizeof(interrupt_user_frame_t));
     task_prepare_user_frame(new_frame, new_image.entry_point, new_image.stack_top);
     current_task->saved_esp = (uint32_t)(uintptr_t)new_frame;
@@ -1154,7 +1327,7 @@ uint32_t proc_sys_fork(interrupt_frame_t *frame) {
 
     child->kind = TASK_USER;
     child->saved_esp = (uint32_t)(uintptr_t)child_frame;
-    child->name = current_task->name;
+    task_set_name(child, current_task->name);
     child->pid = next_pid++;
     child->parent_pid = current_task->pid;
     string_copy(child->cwd, current_task->cwd, sizeof(child->cwd));

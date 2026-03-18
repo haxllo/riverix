@@ -52,6 +52,16 @@ static uintptr_t align_up(uintptr_t value, uint32_t alignment) {
     return (value + alignment - 1u) & ~(uintptr_t)(alignment - 1u);
 }
 
+static uint32_t string_length(const char *text) {
+    uint32_t length = 0u;
+
+    while (text != 0 && text[length] != '\0') {
+        length++;
+    }
+
+    return length;
+}
+
 static void exec_reset_image(exec_image_t *image) {
     uint32_t index;
 
@@ -72,6 +82,39 @@ static void zero_user_page(uint32_t physical_address) {
     for (index = 0u; index < PAGE_SIZE; index++) {
         page[index] = 0u;
     }
+}
+
+static int exec_write_user(uint32_t directory_phys, uintptr_t virtual_address, const void *source, uint32_t length) {
+    const uint8_t *src = (const uint8_t *)source;
+    uint32_t written = 0u;
+
+    while (written < length) {
+        uintptr_t cursor = virtual_address + written;
+        uint32_t physical_page = paging_resolve_physical_in(directory_phys, cursor);
+        uint32_t page_offset;
+        uint32_t chunk;
+        uint8_t *dst;
+        uint32_t index;
+
+        if (physical_page == 0u) {
+            return -1;
+        }
+
+        page_offset = (uint32_t)(cursor & (PAGE_SIZE - 1u));
+        chunk = PAGE_SIZE - page_offset;
+        if (chunk > (length - written)) {
+            chunk = length - written;
+        }
+
+        dst = (uint8_t *)paging_phys_to_virt(physical_page + page_offset);
+        for (index = 0u; index < chunk; index++) {
+            dst[index] = src[written + index];
+        }
+
+        written += chunk;
+    }
+
+    return 0;
 }
 
 static int exec_track_mapping(exec_image_t *image, uintptr_t virtual_address, uint32_t physical_address) {
@@ -271,6 +314,66 @@ static int exec_map_stack(uint32_t directory_phys, exec_image_t *image) {
     return 0;
 }
 
+int exec_prepare_stack(uint32_t directory_phys, exec_image_t *image, const char *const *argv, uint32_t argc) {
+    uintptr_t stack_base = EXEC_USER_STACK_TOP - PAGE_SIZE;
+    uintptr_t stack_pointer = EXEC_USER_STACK_TOP;
+    uintptr_t arg_addresses[EXEC_MAX_ARGS];
+    uint32_t index;
+    uint32_t null_pointer = 0u;
+
+    if (directory_phys == 0u || image == 0 || argc > EXEC_MAX_ARGS) {
+        return -1;
+    }
+
+    for (index = 0u; index < argc; index++) {
+        uint32_t length;
+
+        if (argv == 0 || argv[index] == 0) {
+            return -1;
+        }
+
+        length = string_length(argv[index]) + 1u;
+        if (length > EXEC_ARG_MAX) {
+            return -1;
+        }
+
+        stack_pointer -= length;
+        if (stack_pointer < stack_base) {
+            return -1;
+        }
+
+        if (exec_write_user(directory_phys, stack_pointer, argv[index], length) != 0) {
+            return -1;
+        }
+
+        arg_addresses[index] = stack_pointer;
+    }
+
+    stack_pointer &= ~0x3u;
+
+    stack_pointer -= sizeof(uint32_t);
+    if (stack_pointer < stack_base || exec_write_user(directory_phys, stack_pointer, &null_pointer, sizeof(null_pointer)) != 0) {
+        return -1;
+    }
+
+    for (index = argc; index != 0u; index--) {
+        uint32_t value = (uint32_t)arg_addresses[index - 1u];
+
+        stack_pointer -= sizeof(uint32_t);
+        if (stack_pointer < stack_base || exec_write_user(directory_phys, stack_pointer, &value, sizeof(value)) != 0) {
+            return -1;
+        }
+    }
+
+    stack_pointer -= sizeof(uint32_t);
+    if (stack_pointer < stack_base || exec_write_user(directory_phys, stack_pointer, &argc, sizeof(argc)) != 0) {
+        return -1;
+    }
+
+    image->stack_top = stack_pointer;
+    return 0;
+}
+
 void exec_release_image(uint32_t directory_phys, exec_image_t *image) {
     uint32_t index;
 
@@ -279,9 +382,11 @@ void exec_release_image(uint32_t directory_phys, exec_image_t *image) {
     }
 
     for (index = 0u; index < image->mapped_page_count; index++) {
-        if (image->mapped_pages[index] != 0u) {
+        uint32_t physical_page = 0u;
+
+        if (paging_lookup_page_in(directory_phys, image->mapped_virtuals[index], &physical_page, 0) == 0) {
             paging_unmap_page_in(directory_phys, image->mapped_virtuals[index]);
-            palloc_free_page(image->mapped_pages[index]);
+            palloc_free_page(physical_page);
         }
     }
 
@@ -335,7 +440,7 @@ int exec_load_path(uint32_t directory_phys, const char *path, exec_image_t *imag
     }
 
     for (index = 0u; index < header.phnum; index++) {
-        if (program_headers[index].type != ELF_PROGRAM_LOAD) {
+        if (program_headers[index].type != ELF_PROGRAM_LOAD || program_headers[index].memsz == 0u) {
             continue;
         }
 

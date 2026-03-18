@@ -17,6 +17,9 @@
 #define SYS_DUP2 17
 #define SYS_SLEEP 18
 #define SYS_TICKS 19
+#define SYS_EXECV 20
+#define SYS_READDIR 21
+#define SYS_PROCINFO 22
 
 #define SYS_O_RDONLY 0x1
 #define SYS_O_WRONLY 0x2

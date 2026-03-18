@@ -1,6 +1,6 @@
 # Kernel/User ABI
 
-This document records the current Riverix syscall ABI as of Phase 4. The goal is
+This document records the current Riverix syscall ABI as of Phase 5. The goal is
 stability for the existing numbers and honest documentation of the current
 semantics and limits.
 
@@ -37,6 +37,9 @@ semantics and limits.
 | 17     | `dup2`   | `oldfd`, `newfd`                       | `newfd` or `-1` |
 | 18     | `sleep`  | `ticks`                                | `0` or `-1` |
 | 19     | `ticks`  | none                                   | current PIT tick count |
+| 20     | `execv`  | `path`, `argv`                         | does not return on success |
+| 21     | `readdir`| `path`, `index`, `dirent_ptr`          | `0` on success, `1` at end, `-1` on error |
+| 22     | `procinfo` | `index`, `procinfo_ptr`              | `0` on success, `1` at end, `-1` on error |
 
 ## Flags and structs
 
@@ -77,6 +80,43 @@ Current `kind` values:
 - `2`: regular file
 - `3`: directory
 
+### `sys_dirent_t`
+
+```c
+typedef struct sys_dirent {
+    uint32_t kind;
+    uint32_t size;
+    char name[32];
+} sys_dirent_t;
+```
+
+### `sys_procinfo_t`
+
+```c
+typedef struct sys_procinfo {
+    uint32_t pid;
+    uint32_t parent_pid;
+    uint32_t state;
+    uint32_t kind;
+    uint32_t run_ticks;
+    char name[32];
+} sys_procinfo_t;
+```
+
+Current task-state values:
+
+- `0`: unused
+- `1`: runnable
+- `2`: running
+- `3`: blocked
+- `4`: sleeping
+- `5`: zombie
+
+Current task-kind values:
+
+- `0`: kernel task
+- `1`: user task
+
 ## Path semantics
 
 - Absolute and relative paths are supported.
@@ -90,6 +130,7 @@ Current `kind` values:
 ## Current behavior notes
 
 - `fd 0`, `fd 1`, and `fd 2` are attached to `/dev/console` at task creation.
+- `/dev/console` now supports line-buffered reads over COM1 in addition to writes.
 - The ISO boot path mounts the rootfs read-only, so `open(..., O_CREATE)`,
   `mkdir`, `unlink`, and truncating writes fail there by design.
 - The disk-image boot path mounts `simplefs` read-write and supports file create,
@@ -97,14 +138,17 @@ Current `kind` values:
 - `unlink` currently refuses removal of open files instead of implementing
   deferred Unix-style unlink semantics.
 - Directory file descriptors are not supported yet.
-- `exec` currently accepts only static ELF32 executables from the mounted rootfs.
+- `exec` is now a compatibility wrapper over `execv(path, NULL)`.
+- `execv` builds a simple initial user stack with `argc`, `argv[]`, and a trailing
+  null pointer. Environment variables are not supported yet.
+- Executables are currently static ELF32 `ET_EXEC` images from the mounted rootfs.
 - `sleep` uses PIT ticks. The current kernel programs the PIT at 100 Hz.
 - Kernel entry on behalf of user tasks is treated as non-preemptible until the
   syscall or trap path finishes. User-mode execution remains timer-preemptible.
 
-## Phase 4 proof coverage
+## Proof coverage
 
-The shipped `/bin/phase4` program proves:
+The shipped `/bin/selftest` program preserves the Phase 1 through Phase 4 kernel proof path:
 
 - `chdir` plus relative-path `open`
 - `read` plus `lseek`
@@ -113,5 +157,11 @@ The shipped `/bin/phase4` program proves:
 - disk-path-only `mkdir`, writable `open`, `unlink`, and empty-directory removal
 - shared fd semantics through `dup` and `dup2`
 
-The shipped `/bin/init` runs the full Phase 1 through Phase 4 proof sequence and
-then exits cleanly so the kernel can continue on worker threads and idle.
+The shipped Phase 5 userland bootstrap then adds:
+
+- a real C `/bin/init`
+- `execv`-driven startup through `/bin/sh`
+- `/etc/rc-ro` on the read-only path
+- `/etc/rc-disk` on the writable disk path
+- external tools `echo`, `ls`, `cat`, `mkdir`, `rm`, and `ps`
+- simple shell stdout redirection with `>`

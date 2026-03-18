@@ -6,6 +6,7 @@
 
 #include "kernel/idt.h"
 #include "kernel/vfs.h"
+#include "shared/syscall_abi.h"
 
 typedef void (*task_entry_t)(void *arg);
 
@@ -23,12 +24,15 @@ int32_t proc_seek_fd(uint32_t fd, int32_t offset, uint32_t whence);
 int32_t proc_mkdir(const char *path);
 int32_t proc_unlink(const char *path);
 int32_t proc_stat(const char *path, vfs_stat_t *stat);
+int32_t proc_readdir(const char *path, uint32_t index, sys_dirent_t *entry);
+int32_t proc_procinfo(uint32_t index, sys_procinfo_t *info);
 int32_t proc_chdir(const char *path);
 int32_t proc_dup(uint32_t fd);
 int32_t proc_dup2(uint32_t oldfd, uint32_t newfd);
 uint32_t proc_sys_exit(interrupt_frame_t *frame, int32_t status);
 uint32_t proc_sys_waitpid(interrupt_frame_t *frame, int32_t pid, uint32_t status_user);
 uint32_t proc_sys_exec(interrupt_frame_t *frame, uint32_t path_user);
+uint32_t proc_sys_execv(interrupt_frame_t *frame, uint32_t path_user, uint32_t argv_user);
 uint32_t proc_sys_fork(interrupt_frame_t *frame);
 uint32_t proc_sys_sleep(interrupt_frame_t *frame, uint32_t ticks);
 

@@ -148,6 +148,49 @@ static int32_t sys_stat_handler(const interrupt_frame_t *frame, uint32_t path_ad
     return 0;
 }
 
+static int32_t sys_readdir_handler(const interrupt_frame_t *frame, uint32_t path_address, uint32_t index, uint32_t entry_address) {
+    char path[VFS_PATH_MAX];
+    sys_dirent_t entry;
+    int32_t result;
+
+    if (entry_address == 0u || copy_path_from_frame(frame, path_address, path, sizeof(path)) != 0) {
+        return -1;
+    }
+
+    result = proc_readdir(path, index, &entry);
+    if (result != 0) {
+        return result;
+    }
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(entry_address, &entry, sizeof(entry)) == 0 ? 0 : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)entry_address, &entry, sizeof(entry));
+    return 0;
+}
+
+static int32_t sys_procinfo_handler(const interrupt_frame_t *frame, uint32_t index, uint32_t info_address) {
+    sys_procinfo_t info;
+    int32_t result;
+
+    if (info_address == 0u) {
+        return -1;
+    }
+
+    result = proc_procinfo(index, &info);
+    if (result != 0) {
+        return result;
+    }
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(info_address, &info, sizeof(info)) == 0 ? 0 : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)info_address, &info, sizeof(info));
+    return 0;
+}
+
 uint32_t syscall_dispatch(interrupt_frame_t *frame) {
     char path[VFS_PATH_MAX];
 
@@ -168,6 +211,8 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
         return proc_sys_waitpid(frame, (int32_t)frame->ebx, frame->ecx);
     case SYS_EXEC:
         return proc_sys_exec(frame, frame->ebx);
+    case SYS_EXECV:
+        return proc_sys_execv(frame, frame->ebx, frame->ecx);
     case SYS_FORK:
         return proc_sys_fork(frame);
     case SYS_OPEN:
@@ -220,6 +265,12 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
         return proc_sys_sleep(frame, frame->ebx);
     case SYS_TICKS:
         frame->eax = proc_current_ticks();
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_READDIR:
+        frame->eax = (uint32_t)sys_readdir_handler(frame, frame->ebx, frame->ecx, frame->edx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_PROCINFO:
+        frame->eax = (uint32_t)sys_procinfo_handler(frame, frame->ebx, frame->ecx);
         return (uint32_t)(uintptr_t)frame;
     default:
         frame->eax = (uint32_t)-1;

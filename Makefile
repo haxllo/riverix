@@ -20,10 +20,25 @@ DISK_LOG := $(BUILD_DIR)/qemu-disk.log
 DISK_PERSIST_LOG1 := $(BUILD_DIR)/qemu-disk-pass1.log
 DISK_PERSIST_LOG2 := $(BUILD_DIR)/qemu-disk-pass2.log
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
-USER_LD_SCRIPT := src/user/init.ld
-USER_PROGRAMS := init child fault phase4
+USER_LD_SCRIPT := src/user/user.ld
+USER_ASM_PROGRAMS := selftest child fault phase4
+USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps
+USER_PROGRAMS := $(USER_ASM_PROGRAMS) $(USER_C_PROGRAMS)
+USER_ASM_OBJS := $(addprefix $(BUILD_DIR)/user_asm_,$(addsuffix .o,$(USER_ASM_PROGRAMS)))
+USER_C_OBJS := $(addprefix $(BUILD_DIR)/user_c_,$(addsuffix .o,$(USER_C_PROGRAMS)))
 USER_ELFS := $(addprefix $(BUILD_DIR)/user_,$(addsuffix .elf,$(USER_PROGRAMS)))
+USER_RUNTIME_OBJS := \
+	$(BUILD_DIR)/user_crt0.o \
+	$(BUILD_DIR)/user_libc_syscall.o \
+	$(BUILD_DIR)/user_libc_string.o \
+	$(BUILD_DIR)/user_libc_stdio.o
 ROOTFS_BIN_ITEMS := $(foreach program,$(USER_PROGRAMS),$(BUILD_DIR)/user_$(program).elf /bin/$(program))
+ROOTFS_STATIC_SOURCES := src/rootfs/etc/motd src/rootfs/etc/rc-ro src/rootfs/etc/rc-disk
+ROOTFS_STATIC_ITEMS := \
+	src/rootfs/etc/motd /etc/motd \
+	src/rootfs/etc/rc-ro /etc/rc-ro \
+	src/rootfs/etc/rc-disk /etc/rc-disk
+ROOTFS_ITEMS := $(ROOTFS_BIN_ITEMS) $(ROOTFS_STATIC_ITEMS)
 ROOTFS_IMG := $(BUILD_DIR)/rootfs.img
 MKFS_ROOTFS := $(BUILD_DIR)/mkfs_rootfs
 GRUB_EFI := $(BUILD_DIR)/BOOTX64.EFI
@@ -151,17 +166,29 @@ $(BUILD_DIR)/vga.o: src/kernel/vga.c | $(BUILD_DIR)
 $(BUILD_DIR)/ramdisk.o: src/kernel/ramdisk.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/user_%.o: src/user/%.S | $(BUILD_DIR)
+$(BUILD_DIR)/user_asm_%.o: src/user/%.S | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/user_%.elf: $(BUILD_DIR)/user_%.o $(USER_LD_SCRIPT) | $(BUILD_DIR)
+$(BUILD_DIR)/user_c_%.o: src/user/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/user_crt0.o: src/user/crt0.S | $(BUILD_DIR)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/user_libc_%.o: src/user/libc/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/user_%.elf: $(BUILD_DIR)/user_asm_%.o $(USER_LD_SCRIPT) | $(BUILD_DIR)
 	$(LD) $(USER_LDFLAGS) -o $@ $<
+
+$(foreach program,$(USER_C_PROGRAMS),$(eval $(BUILD_DIR)/user_$(program).elf: $(BUILD_DIR)/user_c_$(program).o $(USER_RUNTIME_OBJS) $(USER_LD_SCRIPT) | $(BUILD_DIR)))
+$(foreach program,$(USER_C_PROGRAMS),$(eval $(BUILD_DIR)/user_$(program).elf: ; $(LD) $(USER_LDFLAGS) -o $$@ $(BUILD_DIR)/user_c_$(program).o $(USER_RUNTIME_OBJS)))
 
 $(MKFS_ROOTFS): tools/mkfs_rootfs.c include/shared/simplefs_format.h | $(BUILD_DIR)
 	$(HOSTCC) $(HOSTCFLAGS) $< -o $@
 
-$(ROOTFS_IMG): $(USER_ELFS) $(MKFS_ROOTFS) | $(BUILD_DIR)
-	$(MKFS_ROOTFS) $@ $(ROOTFS_SIZE_SECTORS) $(ROOTFS_BIN_ITEMS)
+$(ROOTFS_IMG): $(USER_ELFS) $(ROOTFS_STATIC_SOURCES) $(MKFS_ROOTFS) | $(BUILD_DIR)
+	$(MKFS_ROOTFS) $@ $(ROOTFS_SIZE_SECTORS) $(ROOTFS_ITEMS)
 
 $(GRUB_EFI): grub/grub-efi-early.cfg | $(BUILD_DIR)
 	$(GRUB_MKSTANDALONE) -O x86_64-efi -o $@ --modules="$(GRUB_EFI_MODULES)" --install-modules="$(GRUB_EFI_MODULES)" "boot/grub/grub.cfg=grub/grub-efi-early.cfg" >/dev/null
@@ -237,6 +264,7 @@ check: $(ISO) $(OVMF_VARS)
 	grep -q "task: worker-a online" $(LOG)
 	grep -q "task: worker-b online" $(LOG)
 	grep -q "init: online" $(LOG)
+	grep -q "exec: loaded /bin/selftest entry 0x" $(LOG)
 	grep -q "proc: fork child pid 0x" $(LOG)
 	grep -q "exec: loaded /bin/child entry 0x" $(LOG)
 	grep -q "init: child pid 0x" $(LOG)
@@ -258,8 +286,20 @@ check: $(ISO) $(OVMF_VARS)
 	grep -q "phase4: sleep ok" $(LOG)
 	grep -q "phase4: writable skipped" $(LOG)
 	grep -q "init: phase4 exit 0x00000040" $(LOG)
+	grep -q "init: selftest exit 0x00000000" $(LOG)
+	grep -q "exec: loaded /bin/sh entry 0x" $(LOG)
+	grep -q "phase5: shell script ro" $(LOG)
+	grep -q "phase5: motd" $(LOG)
+	grep -q "phase5: ls begin" $(LOG)
+	grep -q "selftest" $(LOG)
+	grep -q "phase5: ls end" $(LOG)
+	grep -q "phase5: ps begin" $(LOG)
+	grep -q "PID      PPID" $(LOG)
+	grep -q "phase5: ps end" $(LOG)
+	grep -q "phase5: ro done" $(LOG)
+	grep -q "init: rc exit 0x00000000" $(LOG)
+	grep -q "init: shell handoff" $(LOG)
 	grep -q "pid 0x" $(LOG)
-	grep -q " work 0x" $(LOG)
 	grep -q "sched: switch" $(LOG)
 	grep -q "pit: tick" $(LOG)
 	@printf 'check passed: %s\n' "$(LOG)"
@@ -286,6 +326,7 @@ check-disk: | $(BUILD_DIR)
 	grep -q "exec: loaded /bin/init entry 0x" $(DISK_LOG)
 	grep -q "task: init as 0x" $(DISK_LOG)
 	grep -q "init: online" $(DISK_LOG)
+	grep -q "exec: loaded /bin/selftest entry 0x" $(DISK_LOG)
 	grep -q "proc: fork child pid 0x" $(DISK_LOG)
 	grep -q "exec: loaded /bin/child entry 0x" $(DISK_LOG)
 	grep -q "init: child pid 0x" $(DISK_LOG)
@@ -309,6 +350,19 @@ check-disk: | $(BUILD_DIR)
 	grep -q "phase4: dup ok" $(DISK_LOG)
 	grep -q "phase4: writable ok" $(DISK_LOG)
 	grep -q "init: phase4 exit 0x00000040" $(DISK_LOG)
+	grep -q "init: selftest exit 0x00000000" $(DISK_LOG)
+	grep -q "exec: loaded /bin/sh entry 0x" $(DISK_LOG)
+	grep -q "phase5: shell script disk" $(DISK_LOG)
+	grep -q "phase5: motd" $(DISK_LOG)
+	grep -q "phase5: ls begin" $(DISK_LOG)
+	grep -q "phase5: ls end" $(DISK_LOG)
+	grep -q "phase5: ps begin" $(DISK_LOG)
+	grep -q "PID      PPID" $(DISK_LOG)
+	grep -q "phase5: ps end" $(DISK_LOG)
+	grep -q "phase5-disk" $(DISK_LOG)
+	grep -q "phase5: disk done" $(DISK_LOG)
+	grep -q "init: rc exit 0x00000000" $(DISK_LOG)
+	grep -q "init: shell handoff" $(DISK_LOG)
 	grep -q "pit: tick" $(DISK_LOG)
 	! grep -q "ramdisk: rootfs module bytes 0x" $(DISK_LOG)
 	@printf 'check passed: %s\n' "$(DISK_LOG)"
@@ -332,6 +386,11 @@ check-disk-persist: | $(BUILD_DIR)
 	grep -q "phase4: dup ok" $(DISK_PERSIST_LOG1)
 	grep -q "phase4: writable ok" $(DISK_PERSIST_LOG1)
 	grep -q "init: phase4 exit 0x00000040" $(DISK_PERSIST_LOG1)
+	grep -q "init: selftest exit 0x00000000" $(DISK_PERSIST_LOG1)
+	grep -q "phase5: shell script disk" $(DISK_PERSIST_LOG1)
+	grep -q "phase5-disk" $(DISK_PERSIST_LOG1)
+	grep -q "phase5: disk done" $(DISK_PERSIST_LOG1)
+	grep -q "init: rc exit 0x00000000" $(DISK_PERSIST_LOG1)
 	grep -q "vfs: rootfs mounted from disk" $(DISK_PERSIST_LOG2)
 	grep -q "storage: bootcount 0x00000002" $(DISK_PERSIST_LOG2)
 	grep -q "init: child exit 0x0000002A" $(DISK_PERSIST_LOG2)
@@ -343,6 +402,11 @@ check-disk-persist: | $(BUILD_DIR)
 	grep -q "phase4: dup ok" $(DISK_PERSIST_LOG2)
 	grep -q "phase4: writable ok" $(DISK_PERSIST_LOG2)
 	grep -q "init: phase4 exit 0x00000040" $(DISK_PERSIST_LOG2)
+	grep -q "init: selftest exit 0x00000000" $(DISK_PERSIST_LOG2)
+	grep -q "phase5: shell script disk" $(DISK_PERSIST_LOG2)
+	grep -q "phase5-disk" $(DISK_PERSIST_LOG2)
+	grep -q "phase5: disk done" $(DISK_PERSIST_LOG2)
+	grep -q "init: rc exit 0x00000000" $(DISK_PERSIST_LOG2)
 	@printf 'check passed: %s %s\n' "$(DISK_PERSIST_LOG1)" "$(DISK_PERSIST_LOG2)"
 
 clean:

@@ -15,6 +15,7 @@ typedef struct vfs_file vfs_file_t;
 typedef struct vfs_dir_entry vfs_dir_entry_t;
 typedef struct vfs_inode_ops vfs_inode_ops_t;
 typedef struct vfs_stat vfs_stat_t;
+typedef struct vfs_dirent_info vfs_dirent_info_t;
 
 typedef int32_t (*vfs_read_op_t)(vfs_file_t *file, void *buffer, uint32_t length);
 typedef int32_t (*vfs_write_op_t)(vfs_file_t *file, const char *buffer, uint32_t length);
@@ -61,6 +62,12 @@ struct vfs_stat {
     uint32_t child_count;
 };
 
+struct vfs_dirent_info {
+    uint32_t kind;
+    uint32_t size;
+    char name[VFS_NAME_MAX];
+};
+
 struct vfs_dir_entry {
     const char *name;
     vfs_inode_t *inode;
@@ -100,6 +107,7 @@ void vfs_retain_file(vfs_file_t *file);
 int32_t vfs_mkdir_path(const char *path);
 int32_t vfs_unlink_path(const char *path);
 int32_t vfs_stat_path(const char *path, vfs_stat_t *stat);
+int32_t vfs_readdir_path(const char *path, uint32_t index, vfs_dirent_info_t *entry);
 int32_t vfs_attach_stdio(vfs_file_t **fd_table, uint32_t fd_count);
 int32_t vfs_clone_fds(vfs_file_t **destination, vfs_file_t **source, uint32_t fd_count);
 void vfs_detach_fds(vfs_file_t **fd_table, uint32_t fd_count);

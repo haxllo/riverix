@@ -8,8 +8,12 @@ enum {
     COM1 = 0x3F8,
 };
 
-static int serial_ready(void) {
+static int serial_tx_ready(void) {
     return (inb(COM1 + 5) & 0x20) != 0;
+}
+
+int serial_can_read(void) {
+    return (inb(COM1 + 5) & 0x01) != 0;
 }
 
 void serial_init(void) {
@@ -24,8 +28,15 @@ void serial_init(void) {
 }
 
 void serial_write_char(char ch) {
-    while (!serial_ready()) {
+    while (!serial_tx_ready()) {
     }
 
     outb(COM1, (uint8_t)ch);
+}
+
+char serial_read_char(void) {
+    while (!serial_can_read()) {
+    }
+
+    return (char)inb(COM1);
 }

@@ -8,6 +8,7 @@
 #include "kernel/kheap.h"
 #include "kernel/partition.h"
 #include "kernel/ramdisk.h"
+#include "kernel/serial.h"
 #include "kernel/simplefs.h"
 
 static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t length);
@@ -61,6 +62,21 @@ static void zero_bytes(void *buffer, uint32_t length) {
     }
 }
 
+static void string_copy(char *destination, const char *source, uint32_t max_length) {
+    uint32_t index = 0u;
+
+    if (destination == 0 || source == 0 || max_length == 0u) {
+        return;
+    }
+
+    while ((index + 1u) < max_length && source[index] != '\0') {
+        destination[index] = source[index];
+        index++;
+    }
+
+    destination[index] = '\0';
+}
+
 static int string_equals_component(const char *candidate, const char *component, uint32_t component_length) {
     uint32_t candidate_length = string_length(candidate);
     uint32_t index;
@@ -110,10 +126,45 @@ static void format_hex32(char *buffer, uint32_t value) {
 }
 
 static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t length) {
+    char *bytes = (char *)buffer;
+    uint32_t count = 0u;
+
     (void)file;
-    (void)buffer;
-    (void)length;
-    return 0;
+
+    if (buffer == 0) {
+        return -1;
+    }
+
+    if (length == 0u) {
+        return 0;
+    }
+
+    while (count < length) {
+        char ch = serial_read_char();
+
+        if (ch == '\r') {
+            ch = '\n';
+        }
+
+        if (ch == '\b' || ch == 0x7Fu) {
+            if (count == 0u) {
+                continue;
+            }
+
+            count--;
+            console_write_len("\b \b", 3u);
+            continue;
+        }
+
+        bytes[count++] = ch;
+        console_write_len(&ch, 1u);
+
+        if (ch == '\n') {
+            break;
+        }
+    }
+
+    return (int32_t)count;
 }
 
 static int32_t console_inode_write(vfs_file_t *file, const char *buffer, uint32_t length) {
@@ -580,6 +631,26 @@ int32_t vfs_stat_path(const char *path, vfs_stat_t *stat) {
     }
 
     vfs_fill_stat(inode, stat);
+    return 0;
+}
+
+int32_t vfs_readdir_path(const char *path, uint32_t index, vfs_dirent_info_t *entry) {
+    const vfs_inode_t *directory = vfs_resolve_path(path);
+    const vfs_dir_entry_t *child;
+
+    if (path == 0 || entry == 0 || directory == 0 || directory->kind != VFS_INODE_DIR) {
+        return -1;
+    }
+
+    if (index >= directory->child_count) {
+        return 1;
+    }
+
+    child = &directory->children[index];
+    entry->kind = child->inode != 0 ? child->inode->kind : VFS_INODE_NONE;
+    entry->size = child->inode != 0 ? child->inode->size : 0u;
+    zero_bytes(entry->name, sizeof(entry->name));
+    string_copy(entry->name, child->name, sizeof(entry->name));
     return 0;
 }
 
