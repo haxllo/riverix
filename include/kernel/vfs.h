@@ -115,5 +115,6 @@ int32_t vfs_read_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, void 
 int32_t vfs_write_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, const char *buffer, uint32_t length);
 uint32_t vfs_root_writable(void);
 int32_t vfs_storage_selftest(void);
+int32_t vfs_reinstall_rootfs(void);
 
 #endif

@@ -1,0 +1,9 @@
+# riverix phase 6 recovery reinstall bootstrap
+echo phase6: reinstall script
+bootmode
+echo phase6: reinstall pwd begin
+pwd
+echo phase6: reinstall pwd end
+echo phase6: reinstall begin
+reinstall
+echo phase6: reinstall done

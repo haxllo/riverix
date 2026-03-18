@@ -12,7 +12,9 @@ typedef sys_bootinfo_t bootinfo_t;
 #define BOOT_ROOT_RAMDISK SYS_BOOT_ROOT_RAMDISK
 
 #define BOOT_FLAG_RECOVERY SYS_BOOT_FLAG_RECOVERY
+#define BOOT_FLAG_REINSTALL SYS_BOOT_FLAG_REINSTALL
 
 int32_t getbootinfo(bootinfo_t *info);
+int32_t reinstall_rootfs(void);
 
 #endif

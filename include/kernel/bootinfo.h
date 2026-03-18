@@ -12,11 +12,13 @@ typedef enum boot_root_policy {
 } boot_root_policy_t;
 
 #define BOOT_FLAG_RECOVERY (1u << 0)
+#define BOOT_FLAG_REINSTALL (1u << 1)
 
 void bootinfo_init(const multiboot_info_t *multiboot_info);
 boot_root_policy_t bootinfo_root_policy(void);
 const char *bootinfo_root_policy_name(boot_root_policy_t policy);
 uint32_t bootinfo_flags(void);
 int bootinfo_recovery_enabled(void);
+int bootinfo_reinstall_enabled(void);
 
 #endif

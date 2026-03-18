@@ -21,12 +21,15 @@ ISO := $(BUILD_DIR)/riverix.iso
 LOG := $(BUILD_DIR)/qemu.log
 DISK_LOG := $(BUILD_DIR)/qemu-disk.log
 DISK_RECOVERY_LOG := $(BUILD_DIR)/qemu-disk-recovery.log
+DISK_REINSTALL_LOG1 := $(BUILD_DIR)/qemu-disk-reinstall-pass1.log
+DISK_REINSTALL_LOG2 := $(BUILD_DIR)/qemu-disk-reinstall-pass2.log
+DISK_REINSTALL_LOG3 := $(BUILD_DIR)/qemu-disk-reinstall-pass3.log
 DISK_PERSIST_LOG1 := $(BUILD_DIR)/qemu-disk-pass1.log
 DISK_PERSIST_LOG2 := $(BUILD_DIR)/qemu-disk-pass2.log
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
 USER_LD_SCRIPT := src/user/user.ld
 USER_ASM_PROGRAMS := selftest child fault phase4
-USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps bootmode pwd
+USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps bootmode pwd reinstall
 USER_PROGRAMS := $(USER_ASM_PROGRAMS) $(USER_C_PROGRAMS)
 USER_ASM_OBJS := $(addprefix $(BUILD_DIR)/user_asm_,$(addsuffix .o,$(USER_ASM_PROGRAMS)))
 USER_C_OBJS := $(addprefix $(BUILD_DIR)/user_c_,$(addsuffix .o,$(USER_C_PROGRAMS)))
@@ -37,18 +40,20 @@ USER_RUNTIME_OBJS := \
 	$(BUILD_DIR)/user_libc_string.o \
 	$(BUILD_DIR)/user_libc_stdio.o
 ROOTFS_BIN_ITEMS := $(foreach program,$(USER_PROGRAMS),$(BUILD_DIR)/user_$(program).elf /bin/$(program))
-ROOTFS_STATIC_SOURCES := src/rootfs/etc/motd src/rootfs/etc/rc-ro src/rootfs/etc/rc-disk src/rootfs/etc/rc-recovery
+ROOTFS_STATIC_SOURCES := src/rootfs/etc/motd src/rootfs/etc/rc-ro src/rootfs/etc/rc-disk src/rootfs/etc/rc-recovery src/rootfs/etc/rc-reinstall
 ROOTFS_STATIC_ITEMS := \
 	src/rootfs/etc/motd /etc/motd \
 	src/rootfs/etc/rc-ro /etc/rc-ro \
 	src/rootfs/etc/rc-disk /etc/rc-disk \
-	src/rootfs/etc/rc-recovery /etc/rc-recovery
+	src/rootfs/etc/rc-recovery /etc/rc-recovery \
+	src/rootfs/etc/rc-reinstall /etc/rc-reinstall
 ROOTFS_ITEMS := $(ROOTFS_BIN_ITEMS) $(ROOTFS_STATIC_ITEMS)
 ROOTFS_IMG := $(BUILD_DIR)/rootfs.img
 MKFS_ROOTFS := $(BUILD_DIR)/mkfs_rootfs
 GRUB_EFI := $(BUILD_DIR)/BOOTX64.EFI
 DISK_IMAGE := $(BUILD_DIR)/riverix-disk.img
 RECOVERY_DISK_IMAGE := $(BUILD_DIR)/riverix-recovery-disk.img
+REINSTALL_DISK_IMAGE := $(BUILD_DIR)/riverix-reinstall-disk.img
 INSTALL_DISK_IMAGE := tools/install_disk_image.sh
 ESP_SIZE_KIB := 65536
 ESP_START_SECTOR := 2048
@@ -93,7 +98,7 @@ OBJS := \
 	$(BUILD_DIR)/vfs.o \
 	$(BUILD_DIR)/vga.o
 
-.PHONY: all clean run check disk-image recovery-disk-image install-image run-disk run-disk-recovery check-disk check-disk-recovery check-disk-persist
+.PHONY: all clean run check disk-image recovery-disk-image reinstall-disk-image install-image run-disk run-disk-recovery run-disk-reinstall check-disk check-disk-recovery check-disk-reinstall check-disk-persist
 
 all: $(ISO)
 
@@ -211,6 +216,9 @@ $(DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/gr
 $(RECOVERY_DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk-recovery.cfg | $(BUILD_DIR)
 	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk-recovery.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
 
+$(REINSTALL_DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk-reinstall.cfg | $(BUILD_DIR)
+	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk-reinstall.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
+
 $(KERNEL): $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
@@ -239,6 +247,8 @@ disk-image: $(DISK_IMAGE)
 
 recovery-disk-image: $(RECOVERY_DISK_IMAGE)
 
+reinstall-disk-image: $(REINSTALL_DISK_IMAGE)
+
 install-image: $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) $(INSTALL_GRUB_CONFIG)
 	@test -n "$(OUTPUT)" || { printf 'usage: make install-image OUTPUT=/path/to/riverix.img [INSTALL_GRUB_CONFIG=grub/grub-disk.cfg]\n' >&2; exit 1; }
 	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$(OUTPUT)" --grub-config "$(INSTALL_GRUB_CONFIG)" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
@@ -250,6 +260,10 @@ run-disk: $(DISK_IMAGE) | $(BUILD_DIR)
 run-disk-recovery: $(RECOVERY_DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+
+run-disk-reinstall: $(REINSTALL_DISK_IMAGE) | $(BUILD_DIR)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(REINSTALL_DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 check: $(ISO) $(OVMF_VARS)
 	rm -f $(LOG)
@@ -430,6 +444,42 @@ check-disk-recovery: | $(BUILD_DIR)
 	grep -q "pit: tick" $(DISK_RECOVERY_LOG)
 	! grep -q "vfs: rootfs mounted from disk" $(DISK_RECOVERY_LOG)
 	@printf 'check passed: %s\n' "$(DISK_RECOVERY_LOG)"
+
+check-disk-reinstall: | $(BUILD_DIR)
+	rm -f $(DISK_IMAGE)
+	$(MAKE) $(DISK_IMAGE)
+	rm -f $(DISK_REINSTALL_LOG1) $(DISK_REINSTALL_LOG2) $(DISK_REINSTALL_LOG3)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_REINSTALL_LOG1) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	$(MCOPY) -o -i $(DISK_IMAGE)@@$$(( $(ESP_START_SECTOR) * 512 )) grub/grub-disk-reinstall.cfg ::/boot/grub/grub.cfg
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_REINSTALL_LOG2) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	$(MCOPY) -o -i $(DISK_IMAGE)@@$$(( $(ESP_START_SECTOR) * 512 )) grub/grub-disk.cfg ::/boot/grub/grub.cfg
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_REINSTALL_LOG3) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	grep -q "vfs: rootfs mounted from disk" $(DISK_REINSTALL_LOG1)
+	grep -q "storage: bootcount 0x00000001" $(DISK_REINSTALL_LOG1)
+	grep -q "phase5-disk" $(DISK_REINSTALL_LOG1)
+	grep -q "phase5: disk done" $(DISK_REINSTALL_LOG1)
+	grep -q "vfs: root policy ramdisk" $(DISK_REINSTALL_LOG2)
+	grep -q "vfs: rootfs mounted from ramdisk" $(DISK_REINSTALL_LOG2)
+	grep -q "init: recovery mode" $(DISK_REINSTALL_LOG2)
+	grep -q "init: reinstall mode" $(DISK_REINSTALL_LOG2)
+	grep -q "phase6: reinstall script" $(DISK_REINSTALL_LOG2)
+	grep -q "bootmode: root ramdisk recovery reinstall" $(DISK_REINSTALL_LOG2)
+	grep -q "phase6: reinstall begin" $(DISK_REINSTALL_LOG2)
+	grep -q "reinstall: begin" $(DISK_REINSTALL_LOG2)
+	grep -q "recovery: reinstall begin blocks 0x" $(DISK_REINSTALL_LOG2)
+	grep -q "recovery: reinstall ok" $(DISK_REINSTALL_LOG2)
+	grep -q "reinstall: ok" $(DISK_REINSTALL_LOG2)
+	grep -q "phase6: reinstall done" $(DISK_REINSTALL_LOG2)
+	grep -q "init: rc exit 0x00000000" $(DISK_REINSTALL_LOG2)
+	grep -q "vfs: rootfs mounted from disk" $(DISK_REINSTALL_LOG3)
+	grep -q "storage: bootcount 0x00000001" $(DISK_REINSTALL_LOG3)
+	! grep -q "storage: bootcount 0x00000002" $(DISK_REINSTALL_LOG3)
+	grep -q "phase5-disk" $(DISK_REINSTALL_LOG3)
+	grep -q "phase5: disk done" $(DISK_REINSTALL_LOG3)
+	@printf 'check passed: %s %s %s\n' "$(DISK_REINSTALL_LOG1)" "$(DISK_REINSTALL_LOG2)" "$(DISK_REINSTALL_LOG3)"
 
 check-disk-persist: | $(BUILD_DIR)
 	rm -f $(DISK_IMAGE)

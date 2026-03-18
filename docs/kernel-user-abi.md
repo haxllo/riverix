@@ -1,7 +1,7 @@
 # Kernel/User ABI
 
 This document records the current Riverix syscall ABI as of the current Phase 6
-recovery-userland slice. The goal is
+recovery-and-reinstall slice. The goal is
 stability for the existing numbers and honest documentation of the current
 semantics and limits.
 
@@ -43,6 +43,7 @@ semantics and limits.
 | 22     | `procinfo` | `index`, `procinfo_ptr`              | `0` on success, `1` at end, `-1` on error |
 | 23     | `bootinfo` | `bootinfo_ptr`                       | `0` or `-1` |
 | 24     | `getcwd` | `buffer`, `length`                     | bytes written, excluding the trailing null, or `-1` |
+| 25     | `reinstall_rootfs` | none                          | `0` or `-1` |
 
 ## Flags and structs
 
@@ -138,6 +139,7 @@ Current boot root-policy values:
 Current boot flags:
 
 - `0x1`: recovery mode
+- `0x2`: scripted reinstall mode
 
 ## Path semantics
 
@@ -170,6 +172,9 @@ Current boot flags:
   syscall or trap path finishes. User-mode execution remains timer-preemptible.
 - `bootinfo` exposes the parsed Multiboot boot mode that the kernel uses for
   rootfs policy and recovery-mode decisions.
+- `reinstall_rootfs` is only intended to succeed while booted from recovery mode
+  on the ramdisk rootfs. It rewrites the full installed `ata0p2` rootfs partition
+  from the known-good `rootfs0` ramdisk block device.
 
 ## Proof coverage
 
@@ -191,9 +196,11 @@ The shipped Phase 5 userland bootstrap then adds:
 - external tools `echo`, `ls`, `cat`, `mkdir`, `rm`, and `ps`
 - simple shell stdout redirection with `>`
 
-The current Phase 6 recovery-userland slice adds:
+The current Phase 6 recovery-and-reinstall slice adds:
 
 - `bootinfo` and `getcwd`
 - recovery-aware `/bin/init`
 - `/etc/rc-recovery` when `recovery=1` is present
-- user tools `/bin/bootmode` and `/bin/pwd`
+- `/etc/rc-reinstall` when `recovery=1 reinstall=1` is present
+- user tools `/bin/bootmode`, `/bin/pwd`, and `/bin/reinstall`
+- the `reinstall_rootfs` syscall for full rootfs restoration from recovery mode

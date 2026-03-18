@@ -18,6 +18,7 @@ static const vfs_inode_t *vfs_resolve_path(const char *path);
 static int32_t vfs_resolve_parent(const char *path, vfs_inode_t **out_parent, char *leaf_name);
 static int32_t vfs_append_child(vfs_inode_t *directory, vfs_inode_t *child);
 static int32_t vfs_mount_root(vfs_inode_t **out_root, block_device_t *device);
+static int32_t vfs_ensure_disk_rootfs_device(block_device_t **out_device);
 static int32_t vfs_try_mount_disk_root(vfs_inode_t **out_root);
 static int32_t vfs_try_mount_ramdisk_root(const multiboot_info_t *multiboot_info, vfs_inode_t **out_root);
 
@@ -28,6 +29,7 @@ static const vfs_file_ops_t console_ops = {
 
 static vfs_inode_t *root_inode;
 static uint32_t root_writable;
+static block_device_t *root_device;
 static vfs_inode_t console_inode = {
     .name = "console",
     .kind = VFS_INODE_DEV,
@@ -43,6 +45,8 @@ static vfs_inode_t console_inode = {
 };
 
 static vfs_file_t *file_table;
+
+#define VFS_REINSTALL_CHUNK_BLOCKS 8u
 
 static uint32_t string_length(const char *text) {
     uint32_t length = 0u;
@@ -380,9 +384,19 @@ static int32_t vfs_mount_root(vfs_inode_t **out_root, block_device_t *device) {
     return simplefs_mount(device, out_root);
 }
 
-static int32_t vfs_try_mount_disk_root(vfs_inode_t **out_root) {
+static int32_t vfs_ensure_disk_rootfs_device(block_device_t **out_device) {
     block_device_t *ata_device;
     block_device_t *rootfs_device;
+
+    if (out_device == 0) {
+        return -1;
+    }
+
+    rootfs_device = block_find("ata0p2");
+    if (rootfs_device != 0) {
+        *out_device = rootfs_device;
+        return 0;
+    }
 
     if (ata_init() != 0) {
         return -1;
@@ -402,12 +416,24 @@ static int32_t vfs_try_mount_disk_root(vfs_inode_t **out_root) {
         return -1;
     }
 
+    *out_device = rootfs_device;
+    return 0;
+}
+
+static int32_t vfs_try_mount_disk_root(vfs_inode_t **out_root) {
+    block_device_t *rootfs_device;
+
+    if (vfs_ensure_disk_rootfs_device(&rootfs_device) != 0) {
+        return -1;
+    }
+
     if (vfs_mount_root(out_root, rootfs_device) != 0) {
         console_write("vfs: disk rootfs mount failed\n");
         return -1;
     }
 
     root_writable = rootfs_device->read_only == 0u ? 1u : 0u;
+    root_device = rootfs_device;
     console_write("vfs: rootfs mounted from disk\n");
     return 0;
 }
@@ -432,6 +458,7 @@ static int32_t vfs_try_mount_ramdisk_root(const multiboot_info_t *multiboot_info
     }
 
     root_writable = 0u;
+    root_device = rootfs_device;
     console_write("vfs: rootfs mounted from ramdisk\n");
     return 0;
 }
@@ -442,6 +469,7 @@ void vfs_init(const multiboot_info_t *multiboot_info) {
 
     root_inode = 0;
     root_writable = 0u;
+    root_device = 0;
 
     if (file_table == 0) {
         file_table = (vfs_file_t *)kzalloc(sizeof(vfs_file_t) * VFS_MAX_FILES);
@@ -783,6 +811,70 @@ int32_t vfs_write_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, cons
 
 uint32_t vfs_root_writable(void) {
     return root_writable;
+}
+
+int32_t vfs_reinstall_rootfs(void) {
+    block_device_t *source_device;
+    block_device_t *destination_device;
+    uint8_t *buffer;
+    uint32_t chunk_blocks;
+    uint32_t block_index;
+
+    if (!bootinfo_recovery_enabled()) {
+        console_write("recovery: reinstall denied\n");
+        return -1;
+    }
+
+    source_device = block_find("rootfs0");
+    if (source_device == 0 || root_device != source_device) {
+        console_write("recovery: source rootfs unavailable\n");
+        return -1;
+    }
+
+    if (vfs_ensure_disk_rootfs_device(&destination_device) != 0) {
+        console_write("recovery: disk rootfs unavailable\n");
+        return -1;
+    }
+
+    if (destination_device->read_only != 0u ||
+        source_device->block_size != destination_device->block_size ||
+        source_device->block_count != destination_device->block_count) {
+        console_write("recovery: reinstall geometry mismatch\n");
+        return -1;
+    }
+
+    chunk_blocks = VFS_REINSTALL_CHUNK_BLOCKS;
+    if (chunk_blocks == 0u) {
+        return -1;
+    }
+
+    buffer = (uint8_t *)kmalloc(source_device->block_size * chunk_blocks);
+    if (buffer == 0) {
+        console_write("recovery: reinstall no buffer\n");
+        return -1;
+    }
+
+    console_write("recovery: reinstall begin blocks 0x");
+    console_write_hex32(source_device->block_count);
+    console_write("\n");
+
+    for (block_index = 0u; block_index < source_device->block_count; block_index += chunk_blocks) {
+        uint32_t remaining_blocks = source_device->block_count - block_index;
+        uint32_t current_chunk = remaining_blocks < chunk_blocks ? remaining_blocks : chunk_blocks;
+
+        if (block_read(source_device, block_index, current_chunk, buffer) != 0 ||
+            block_write(destination_device, block_index, current_chunk, buffer) != 0) {
+            kfree(buffer);
+            console_write("recovery: reinstall failed at 0x");
+            console_write_hex32(block_index);
+            console_write("\n");
+            return -1;
+        }
+    }
+
+    kfree(buffer);
+    console_write("recovery: reinstall ok\n");
+    return 0;
 }
 
 int32_t vfs_storage_selftest(void) {

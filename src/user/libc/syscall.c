@@ -168,3 +168,10 @@ int32_t getbootinfo(bootinfo_t *info) {
     __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_BOOTINFO), "b"(info) : "memory");
     return result;
 }
+
+int32_t reinstall_rootfs(void) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_REINSTALL_ROOTFS) : "memory");
+    return result;
+}

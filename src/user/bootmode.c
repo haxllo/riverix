@@ -30,6 +30,9 @@ int main(int argc, char **argv) {
     if ((info.flags & BOOT_FLAG_RECOVERY) != 0u) {
         putstr_fd(1, " recovery");
     }
+    if ((info.flags & BOOT_FLAG_REINSTALL) != 0u) {
+        putstr_fd(1, " reinstall");
+    }
     putstr_fd(1, "\n");
     return 0;
 }

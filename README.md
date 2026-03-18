@@ -76,7 +76,12 @@ slice is now in place too: boot-mode parsing lives in a shared kernel `bootinfo`
 userspace can query boot mode and cwd directly through syscalls, `/bin/init` explicitly
 switches into recovery mode when `recovery=1` is present, and the recovery image now runs
 `/etc/rc-recovery` with `/bin/bootmode` and `/bin/pwd` before handing off to an
-interactive shell.
+interactive shell. Phase 6.3 is now in place too: recovery mode exposes a real reinstall
+path that block-copies the known-good ramdisk rootfs back onto the installed
+`riverix-rootfs` partition through a narrow recovery-only syscall, `/bin/reinstall`, and
+`/etc/rc-reinstall`. The repository now has an automated three-boot proof that the
+reinstall path really resets persisted disk state instead of only printing recovery
+markers.
 
 ## Why this shape
 
@@ -111,6 +116,7 @@ This produces:
 - `build/riverix.iso`
 - `build/riverix-disk.img` via `make disk-image`
 - `build/riverix-recovery-disk.img` via `make recovery-disk-image`
+- `build/riverix-reinstall-disk.img` via `make reinstall-disk-image`
 
 ## Run
 
@@ -128,6 +134,12 @@ For the recovery-first disk image:
 
 ```bash
 make run-disk-recovery
+```
+
+For the recovery-reinstall disk image:
+
+```bash
+make run-disk-reinstall
 ```
 
 To install the current build to an arbitrary raw image path:
@@ -152,6 +164,12 @@ For the recovery disk image:
 
 ```bash
 make check-disk-recovery
+```
+
+To verify recovery reinstall resets the installed rootfs:
+
+```bash
+make check-disk-reinstall
 ```
 
 To verify persistence across two boots:
@@ -184,6 +202,11 @@ verifies that GRUB loads the ramdisk rootfs from the ESP, confirms that the kern
 `root=ramdisk`, confirms that `/bin/init` enters explicit recovery mode, and then runs the
 dedicated recovery script plus shell bootstrap on the recovery path.
 
+The `check-disk-reinstall` target boots a normal disk image once, flips that same image
+into scripted recovery-reinstall mode, restores the disk rootfs from `/boot/rootfs.img`,
+and then boots the same disk image again to prove the persistent `/var/bootcount` state
+has been reset.
+
 The `check-disk-persist` target rebuilds a fresh disk image, boots it twice, and confirms
 that the writable rootfs path persists the `/var/bootcount` update from the first boot to
 the second.
@@ -208,11 +231,12 @@ See `docs/plans/2026-03-18-phase-4-abi-growth.md` for the Phase 4 implementation
 See `docs/plans/2026-03-18-phase-5-userland-bootstrap.md` for the Phase 5 implementation plan.
 See `docs/plans/2026-03-19-phase-6-install-and-recovery.md` for the current Phase 6 plan.
 See `docs/plans/2026-03-19-phase-6-recovery-userland.md` for the current recovery-userland slice.
+See `docs/plans/2026-03-19-phase-6-reinstall-path.md` for the current recovery reinstall slice.
 See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Continue Phase 6 with real repair/reinstall behavior so recovery mode can do more than inspect the system.
+1. Expand recovery mode beyond full-rootfs reinstall into more selective inspect and repair tooling.
 2. Expand the shell and base userland beyond the first tool set while keeping the ABI conservative.
 3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
 4. Replace the narrow ATA PIO path with a broader disk stack that can grow into PCI/AHCI or NVMe.

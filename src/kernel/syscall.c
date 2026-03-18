@@ -317,6 +317,9 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
     case SYS_GETCWD:
         frame->eax = (uint32_t)sys_getcwd_handler(frame, frame->ebx, frame->ecx);
         return (uint32_t)(uintptr_t)frame;
+    case SYS_REINSTALL_ROOTFS:
+        frame->eax = (uint32_t)vfs_reinstall_rootfs();
+        return (uint32_t)(uintptr_t)frame;
     default:
         frame->eax = (uint32_t)-1;
         return (uint32_t)(uintptr_t)frame;

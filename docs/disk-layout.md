@@ -4,6 +4,7 @@
 
 - `make disk-image` builds the normal installed image at `build/riverix-disk.img`
 - `make recovery-disk-image` builds a recovery-first image at `build/riverix-recovery-disk.img`
+- `make reinstall-disk-image` builds a scripted recovery-reinstall image at `build/riverix-reinstall-disk.img`
 
 Both images use the same layout and filesystem contents. The only difference is the
 default GRUB configuration copied into the EFI System Partition.
@@ -46,6 +47,7 @@ Normal installed image:
 - GRUB default entry passes `root=disk`
 - The kernel mounts `riverix-rootfs` from the disk partition
 - The GRUB menu also exposes a recovery entry that passes `root=ramdisk recovery=1`
+- The GRUB menu also exposes a recovery-reinstall entry that passes `root=ramdisk recovery=1 reinstall=1`
 
 Recovery image:
 
@@ -54,9 +56,19 @@ Recovery image:
 - The kernel mounts the ramdisk rootfs and keeps the writable disk path out of the boot
   decision
 
+Recovery reinstall image:
+
+- GRUB default entry passes `root=ramdisk recovery=1 reinstall=1`
+- GRUB still loads `/boot/rootfs.img` as the Multiboot `rootfs` module
+- `/bin/init` switches to `/etc/rc-reinstall`, which invokes `/bin/reinstall`
+- The reinstall path copies the full `rootfs0` block device back onto `ata0p2`
+
 The `recovery=1` flag now drives real recovery-specific userspace behavior: the kernel
 still uses the explicit `root=` policy for rootfs selection, and `/bin/init` now detects
 the recovery flag and runs `/etc/rc-recovery` before handing off to an interactive shell.
+When `reinstall=1` is also present, `/bin/init` instead runs `/etc/rc-reinstall` and the
+kernel allows a recovery-only reinstall syscall that rewrites the installed rootfs
+partition from the known-good ramdisk rootfs image.
 
 ## Host-side install flow
 
@@ -77,6 +89,7 @@ Typical usage:
 ```bash
 make disk-image
 make recovery-disk-image
+make reinstall-disk-image
 make install-image OUTPUT=/tmp/riverix-custom.img
 ```
 
@@ -86,14 +99,22 @@ To build a custom recovery-first image at an arbitrary path:
 make install-image OUTPUT=/tmp/riverix-recovery.img INSTALL_GRUB_CONFIG=grub/grub-disk-recovery.cfg
 ```
 
+To build a custom scripted recovery-reinstall image at an arbitrary path:
+
+```bash
+make install-image OUTPUT=/tmp/riverix-reinstall.img INSTALL_GRUB_CONFIG=grub/grub-disk-reinstall.cfg
+```
+
 ## Verification targets
 
 ```bash
 make check-disk
 make check-disk-recovery
+make check-disk-reinstall
 make check-disk-persist
 ```
 
 - `check-disk` proves disk-root boot from the installed image
 - `check-disk-recovery` proves ramdisk-root recovery boot from a disk image
+- `check-disk-reinstall` proves recovery mode can restore the installed disk rootfs from the ESP-backed ramdisk payload
 - `check-disk-persist` proves the writable rootfs survives reboot

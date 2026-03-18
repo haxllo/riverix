@@ -30,6 +30,7 @@ enum {
     SYS_PROCINFO = 22u,
     SYS_BOOTINFO = 23u,
     SYS_GETCWD = 24u,
+    SYS_REINSTALL_ROOTFS = 25u,
 };
 
 enum {
@@ -40,6 +41,7 @@ enum {
 
 enum {
     SYS_BOOT_FLAG_RECOVERY = 1u << 0,
+    SYS_BOOT_FLAG_REINSTALL = 1u << 1,
 };
 
 enum {

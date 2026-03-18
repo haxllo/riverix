@@ -13,6 +13,7 @@ _Static_assert((uint32_t)BOOT_ROOT_AUTO == SYS_BOOT_ROOT_AUTO, "boot root auto A
 _Static_assert((uint32_t)BOOT_ROOT_DISK == SYS_BOOT_ROOT_DISK, "boot root disk ABI mismatch");
 _Static_assert((uint32_t)BOOT_ROOT_RAMDISK == SYS_BOOT_ROOT_RAMDISK, "boot root ramdisk ABI mismatch");
 _Static_assert((uint32_t)BOOT_FLAG_RECOVERY == SYS_BOOT_FLAG_RECOVERY, "boot recovery flag ABI mismatch");
+_Static_assert((uint32_t)BOOT_FLAG_REINSTALL == SYS_BOOT_FLAG_REINSTALL, "boot reinstall flag ABI mismatch");
 
 static uint32_t string_length(const char *text) {
     uint32_t length = 0u;
@@ -75,10 +76,17 @@ void bootinfo_init(const multiboot_info_t *multiboot_info) {
         boot_flags_value |= BOOT_FLAG_RECOVERY;
     }
 
+    if (string_contains(cmdline, "reinstall=1")) {
+        boot_flags_value |= BOOT_FLAG_REINSTALL;
+    }
+
     console_write("boot: root ");
     console_write(bootinfo_root_policy_name(root_policy_value));
     if ((boot_flags_value & BOOT_FLAG_RECOVERY) != 0u) {
         console_write(" recovery");
+    }
+    if ((boot_flags_value & BOOT_FLAG_REINSTALL) != 0u) {
+        console_write(" reinstall");
     }
     console_write("\n");
 }
@@ -104,4 +112,8 @@ uint32_t bootinfo_flags(void) {
 
 int bootinfo_recovery_enabled(void) {
     return (boot_flags_value & BOOT_FLAG_RECOVERY) != 0u;
+}
+
+int bootinfo_reinstall_enabled(void) {
+    return (boot_flags_value & BOOT_FLAG_REINSTALL) != 0u;
 }

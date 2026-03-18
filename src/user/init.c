@@ -43,6 +43,7 @@ int main(int argc, char **argv) {
     static const char *ro_argv[] = { "sh", "/etc/rc-ro", 0 };
     static const char *disk_argv[] = { "sh", "/etc/rc-disk", 0 };
     static const char *recovery_argv[] = { "sh", "/etc/rc-recovery", 0 };
+    static const char *reinstall_argv[] = { "sh", "/etc/rc-reinstall", 0 };
     static const char *shell_argv[] = { "sh", 0 };
     const char *const *script_argv;
     int32_t status = 0;
@@ -64,7 +65,12 @@ int main(int argc, char **argv) {
 
     if (getbootinfo(&info) == 0 && (info.flags & BOOT_FLAG_RECOVERY) != 0u) {
         putstr_fd(1, "init: recovery mode\n");
-        script_argv = recovery_argv;
+        if ((info.flags & BOOT_FLAG_REINSTALL) != 0u) {
+            putstr_fd(1, "init: reinstall mode\n");
+            script_argv = reinstall_argv;
+        } else {
+            script_argv = recovery_argv;
+        }
     } else {
         script_argv = detect_writable_root() ? disk_argv : ro_argv;
     }
