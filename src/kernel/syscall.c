@@ -202,7 +202,6 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
         frame->eax = proc_current_pid();
         return (uint32_t)(uintptr_t)frame;
     case SYS_YIELD:
-        return 0;
         frame->eax = 0u;
         return proc_schedule(frame);
     case SYS_EXIT:
