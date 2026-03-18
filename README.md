@@ -81,6 +81,12 @@ modes, and recovery mode can either boot into an inspection shell or restore the
 installed `riverix-rootfs` partition from the known-good ramdisk image. The repository now
 has automated proofs for normal disk boot, recovery boot, reinstall reset, and
 persistence across reboot, which satisfies the Phase 6 install-story exit criterion.
+Phase 7 is now in place too: the block layer has explicit controller/device separation,
+the kernel has early PCI config-space discovery plus a shared MMIO mapping window, and
+storage bring-up now prefers a PCI AHCI controller path before falling back to legacy ATA
+PIO. The same GPT/simplefs installed image is now verified through both the ATA PIO path
+and a QEMU AHCI path, so the storage stack is no longer tied to a single narrow legacy
+disk path.
 
 ## Why this shape
 
@@ -204,9 +210,9 @@ Phase 4 `/bin/phase4` ABI proof on the read-only rootfs path, and timer-driven s
 activity.
 
 The `check-disk` target boots the raw disk image in headless QEMU and verifies the ATA
-driver, GPT rootfs partition discovery, disk-backed `simplefs` mount, the same user-mode
-process lifecycle, the writable Phase 4 filesystem/fd proof, and timer-driven scheduler
-activity.
+PIO fallback path, GPT rootfs partition discovery, disk-backed `simplefs` mount, the same
+user-mode process lifecycle, the writable Phase 4 filesystem/fd proof, and timer-driven
+scheduler activity.
 
 The `check-disk-ahci` target boots the same installed disk image behind QEMU's AHCI
 controller, verifies PCI discovery plus MMIO-backed AHCI bring-up, and confirms that the
