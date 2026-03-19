@@ -92,7 +92,12 @@ and controlling-tty metadata; `/dev/tty` is resolved against the current task; `
 the VFS enforces Unix-style mode-bit checks plus sticky `/tmp` rules; the shell now has a
 cleaner `riverix:/cwd#` or `$` prompt and can launch real pipelines; and the shipped
 userspace now includes `id`, `tty`, and `/bin/phase8`, which proves session handling plus
-non-root permission enforcement on the writable disk path.
+non-root permission enforcement on the writable disk path. Phase 9 is now in place too:
+the kernel brings up a QEMU-first e1000 NIC through the existing PCI/MMIO path, exposes a
+staged `netinfo`/`ping4` syscall ABI instead of pretending sockets already exist, applies a
+static guest IPv4 configuration (`10.0.2.15/24`, gateway `10.0.2.2`), and ships `/bin/netinfo`
+plus `/bin/ping` so the rc scripts can prove a real ARP + ICMP echo exchange on the ISO,
+disk, AHCI, and recovery paths.
 
 ## Why this shape
 
@@ -213,21 +218,25 @@ the Multiboot rootfs module handoff, block-device registration, filesystem mount
 loading of `/bin/init`, the `fork` -> `exec("/bin/child")` -> `waitpid` lifecycle, the
 faulting `/bin/fault` user program with kill-on-fault recovery, the COW fork proof, the
 Phase 4 `/bin/phase4` ABI proof on the read-only rootfs path, the Phase 8 shell pipeline
-and tty/session markers on the read-only boot, and timer-driven scheduler activity.
+and tty/session markers on the read-only boot, the Phase 9 `netinfo` + `ping 10.0.2.2`
+proof, and timer-driven scheduler activity.
 
 The `check-disk` target boots the raw disk image in headless QEMU and verifies the ATA
 PIO fallback path, GPT rootfs partition discovery, disk-backed `simplefs` mount, the same
 user-mode process lifecycle, the writable Phase 4 filesystem/fd proof, the Phase 8
-non-root `/etc` denial plus `/tmp` write proof, and timer-driven scheduler activity.
+non-root `/etc` denial plus `/tmp` write proof, the Phase 9 `netinfo` + `ping 10.0.2.2`
+proof, and timer-driven scheduler activity.
 
 The `check-disk-ahci` target boots the same installed disk image behind QEMU's AHCI
 controller, verifies PCI discovery plus MMIO-backed AHCI bring-up, and confirms that the
-same GPT rootfs and userland path still boot cleanly without falling back to ATA.
+same GPT rootfs, userland path, and Phase 9 network proof still boot cleanly without
+falling back to ATA.
 
 The `check-disk-recovery` target boots a recovery-first raw disk image in headless QEMU,
 verifies that GRUB loads the ramdisk rootfs from the ESP, confirms that the kernel honors
 `root=ramdisk`, confirms that `/bin/init` enters explicit recovery mode, and then runs the
-dedicated recovery script plus shell bootstrap on the recovery path.
+dedicated recovery script plus shell bootstrap on the recovery path, including the Phase 9
+network state probe.
 
 The `check-disk-reinstall` target boots a normal disk image once, flips that same image
 into scripted recovery-reinstall mode, restores the disk rootfs from `/boot/rootfs.img`,
@@ -261,11 +270,12 @@ See `docs/plans/2026-03-19-phase-6-recovery-userland.md` for the current recover
 See `docs/plans/2026-03-19-phase-6-reinstall-path.md` for the current recovery reinstall slice.
 See `docs/plans/2026-03-19-phase-7-storage-controller-path.md` for the Phase 7 storage-controller work.
 See `docs/plans/2026-03-19-phase-8-tty-permissions-pipes.md` for the Phase 8 implementation plan.
+See `docs/plans/2026-03-19-phase-9-qemu-first-networking.md` for the Phase 9 networking implementation plan.
 See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Start Phase 9 with a minimal QEMU-first networking path instead of widening local-only userland further.
-2. Keep the new tty/permission/pipeline semantics stable while growing the syscall and tool surface.
+1. Start Phase 10 with stronger panic/fault reporting, traces, and long-run verification instead of widening APIs again immediately.
+2. Keep the new networking path stable while strengthening the storage and process internals it depends on.
 3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
 4. Keep reducing hardcoded limits in kernel subsystems that still assume a very small userland.

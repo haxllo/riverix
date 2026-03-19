@@ -9,6 +9,7 @@
 #include "kernel/memory.h"
 #include "kernel/mmio.h"
 #include "kernel/multiboot.h"
+#include "kernel/net.h"
 #include "kernel/palloc.h"
 #include "kernel/paging.h"
 #include "kernel/pic.h"
@@ -94,6 +95,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     idt_init();
     pic_init();
     pit_init(100u);
+    (void)net_init();
     vfs_init(high_multiboot_info);
     (void)vfs_storage_selftest();
     proc_init();

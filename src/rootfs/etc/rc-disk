@@ -17,6 +17,10 @@ echo phase8: id begin
 id
 echo phase8: id end
 phase8
+echo phase9: net begin
+netinfo
+ping 10.0.2.2
+echo phase9: net end
 mkdir /var/phase5-dir
 echo phase5-disk > /var/phase5-dir/note
 cat /var/phase5-dir/note

@@ -3,6 +3,7 @@
 #include "shared/syscall_abi.h"
 #include "user/boot.h"
 #include "user/dirent.h"
+#include "user/net.h"
 #include "user/proc.h"
 #include "user/sys/stat.h"
 #include "user/unistd.h"
@@ -222,5 +223,19 @@ int32_t reinstall_rootfs(void) {
     int32_t result;
 
     __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_REINSTALL_ROOTFS) : "memory");
+    return result;
+}
+
+int32_t getnetinfo(netinfo_t *info) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_NETINFO), "b"(info) : "memory");
+    return result;
+}
+
+int32_t ping4(uint32_t ipv4_address, uint32_t timeout_ticks) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_PING4), "b"(ipv4_address), "c"(timeout_ticks) : "memory");
     return result;
 }

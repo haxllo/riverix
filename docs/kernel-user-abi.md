@@ -1,7 +1,7 @@
 # Kernel/User ABI
 
-This document records the current Riverix syscall ABI as of the current Phase 8
-tty/permission/pipeline slice. The goal is
+This document records the current Riverix syscall ABI as of the current Phase 9
+QEMU-first networking slice. The goal is
 stability for the existing numbers and honest documentation of the current
 semantics and limits.
 
@@ -51,6 +51,8 @@ semantics and limits.
 | 30     | `setsid` | none                                  | new session id or `-1` |
 | 31     | `gettty` | `buffer`, `length`                    | bytes written, excluding the trailing null, or `-1` |
 | 32     | `pipe`   | `fds_ptr`                             | `0` or `-1` |
+| 33     | `netinfo` | `netinfo_ptr`                        | `0` or `-1` |
+| 34     | `ping4`  | `ipv4_addr`, `timeout_ticks`          | `0` on reply, negative staged error on failure |
 
 ## Flags and structs
 
@@ -161,6 +163,34 @@ Current boot flags:
 - `0x1`: recovery mode
 - `0x2`: scripted reinstall mode
 
+### `sys_netinfo_t`
+
+```c
+typedef struct sys_netinfo {
+    uint32_t ready;
+    uint8_t mac[6];
+    uint8_t reserved0[2];
+    uint32_t ipv4_addr;
+    uint32_t ipv4_netmask;
+    uint32_t ipv4_gateway;
+    uint32_t arp_valid;
+    uint8_t arp_mac[6];
+    uint8_t reserved1[2];
+    uint32_t arp_ipv4;
+    uint32_t rx_packets;
+    uint32_t tx_packets;
+} sys_netinfo_t;
+```
+
+Current staged `ping4` results:
+
+- `0`: echo reply received
+- `-1`: timeout
+- `-2`: unreachable
+- `-3`: networking unavailable
+- `-4`: ping already in progress
+- `-5`: invalid request
+
 ### Mode bits
 
 - `SYS_MODE_IRUSR = 0x100`
@@ -218,6 +248,14 @@ Current boot flags:
 - `reinstall_rootfs` is only intended to succeed while booted from recovery mode
   on the ramdisk rootfs. It rewrites the full installed `ata0p2` rootfs partition
   from the known-good `rootfs0` ramdisk block device.
+- `netinfo` exposes the current staged network state for the single supported
+  QEMU-first e1000 path: readiness, MAC, static IPv4 config, one ARP cache entry,
+  and simple RX/TX counters.
+- `ping4` is intentionally a staged syscall rather than a socket API. It blocks
+  the calling task in-kernel until the network poll path sees a matching ICMP echo
+  reply or the timeout expires.
+- Riverix Phase 9 networking is currently static-config only:
+  `10.0.2.15/24` with gateway `10.0.2.2` under QEMU user networking.
 
 ## Proof coverage
 

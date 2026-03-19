@@ -326,6 +326,10 @@ The system starts behaving like a recognizable small Unix rather than a kernel d
 
 The system can at least communicate over a virtual network in QEMU for testing and future package/tool transfer.
 
+**Status:** Implemented on `main` with a QEMU-first e1000 path, static IPv4 config,
+a staged `netinfo`/`ping4` ABI, and automated boot proofs across the ISO, ATA disk,
+AHCI disk, and recovery paths.
+
 ### Phase 10: Robustness, Observability, And Cleanup
 
 **Why now:** Once the system is minimally usable, the main risk becomes entropy.
@@ -358,8 +362,8 @@ These should happen continuously instead of being postponed to the end:
 
 If we continue right now, the best order is:
 
-1. Start Phase 9 networking with a narrow QEMU-first NIC path
-2. Keep Phase 8 tty/permission/pipeline semantics stable under that load
+1. Start Phase 10 robustness work with stronger tracing, fault reporting, and long-run checks
+2. Keep the new networking path stable while growing observability instead of widening APIs too early
 3. Strengthen storage internals once the next wider userland slice starts leaning on them
 
 That order keeps the next critical path on a new subsystem while preserving the now-real local Unix environment.

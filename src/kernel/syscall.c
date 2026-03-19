@@ -4,6 +4,7 @@
 
 #include "kernel/bootinfo.h"
 #include "kernel/idt.h"
+#include "kernel/net.h"
 #include "kernel/proc.h"
 #include "kernel/usercopy.h"
 #include "kernel/vfs.h"
@@ -121,6 +122,21 @@ static int32_t sys_bootinfo_handler(const interrupt_frame_t *frame, uint32_t inf
 
     info.root_policy = (uint32_t)bootinfo_root_policy();
     info.flags = bootinfo_flags();
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(info_address, &info, sizeof(info)) == 0 ? 0 : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)info_address, &info, sizeof(info));
+    return 0;
+}
+
+static int32_t sys_netinfo_handler(const interrupt_frame_t *frame, uint32_t info_address) {
+    sys_netinfo_t info;
+
+    if (info_address == 0u || net_get_info(&info) != 0) {
+        return -1;
+    }
 
     if (interrupt_from_user(frame)) {
         return user_copy_to(info_address, &info, sizeof(info)) == 0 ? 0 : -1;
@@ -279,6 +295,11 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
         return (uint32_t)(uintptr_t)frame;
     case SYS_PIPE:
         return proc_sys_pipe(frame, frame->ebx);
+    case SYS_NETINFO:
+        frame->eax = (uint32_t)sys_netinfo_handler(frame, frame->ebx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_PING4:
+        return proc_sys_ping4(frame, frame->ebx, frame->ecx);
     default:
         frame->eax = (uint32_t)-1;
         return (uint32_t)(uintptr_t)frame;

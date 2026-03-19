@@ -6,6 +6,7 @@
 #include "kernel/exec.h"
 #include "kernel/gdt.h"
 #include "kernel/kstack.h"
+#include "kernel/net.h"
 #include "kernel/paging.h"
 #include "kernel/pit.h"
 #include "kernel/syscall.h"
@@ -39,6 +40,7 @@ typedef enum task_block_reason {
     TASK_BLOCK_WAITPID,
     TASK_BLOCK_IO_READ,
     TASK_BLOCK_IO_WRITE,
+    TASK_BLOCK_NET_PING,
 } task_block_reason_t;
 
 typedef struct task {
@@ -892,6 +894,21 @@ static void proc_complete_blocked_io(task_t *task, int32_t result) {
     }
 }
 
+static void proc_complete_blocked_ping(task_t *task, int32_t result) {
+    interrupt_frame_t *frame;
+
+    if (task == 0 || task->saved_esp == 0u) {
+        return;
+    }
+
+    frame = (interrupt_frame_t *)(uintptr_t)task->saved_esp;
+    frame->eax = (uint32_t)result;
+    task->block_reason = TASK_BLOCK_NONE;
+    if (task->state == TASK_BLOCKED) {
+        task->state = TASK_RUNNABLE;
+    }
+}
+
 static void proc_retry_blocked_read(task_t *task) {
     char staging[PROC_IO_CHUNK];
     vfs_file_t *file;
@@ -1019,6 +1036,27 @@ static void proc_service_blocked_io(void) {
     }
 }
 
+static void proc_service_blocked_net(void) {
+    uint32_t index;
+
+    for (index = 0u; index < MAX_TASKS; index++) {
+        task_t *task = &tasks[index];
+        int32_t result;
+        int32_t status;
+
+        if (task->state != TASK_BLOCKED || task->block_reason != TASK_BLOCK_NET_PING) {
+            continue;
+        }
+
+        status = net_ping4_poll_result(task->pid, &result);
+        if (status == 1) {
+            proc_complete_blocked_ping(task, result);
+        } else if (status < 0) {
+            proc_complete_blocked_ping(task, SYS_PING_ERR_INVALID);
+        }
+    }
+}
+
 static void idle_entry(void *arg) {
     (void)arg;
 
@@ -1121,6 +1159,8 @@ uint32_t proc_schedule(interrupt_frame_t *frame) {
     }
 
     proc_wake_sleepers();
+    net_poll();
+    proc_service_blocked_net();
     proc_service_blocked_io();
     proc_collect_reapable_zombies();
 
@@ -1958,5 +1998,24 @@ uint32_t proc_sys_sleep(interrupt_frame_t *frame, uint32_t ticks) {
     current_task->wake_tick = pit_ticks() + ticks;
     current_task->state = TASK_SLEEPING;
     frame->eax = 0u;
+    return proc_schedule(frame);
+}
+
+uint32_t proc_sys_ping4(interrupt_frame_t *frame, uint32_t destination_ipv4, uint32_t timeout_ticks) {
+    int32_t result;
+
+    if (current_task == 0) {
+        frame->eax = (uint32_t)SYS_PING_ERR_INVALID;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    result = net_ping4_start(current_task->pid, destination_ipv4, timeout_ticks);
+    if (result != 0) {
+        frame->eax = (uint32_t)result;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    current_task->block_reason = TASK_BLOCK_NET_PING;
+    current_task->state = TASK_BLOCKED;
     return proc_schedule(frame);
 }

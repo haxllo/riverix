@@ -17,4 +17,8 @@ echo phase8: id begin
 id
 echo phase8: id end
 phase8
+echo phase9: net begin
+netinfo
+ping 10.0.2.2
+echo phase9: net end
 echo phase5: ro done

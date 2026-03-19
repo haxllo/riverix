@@ -22,7 +22,14 @@ static uint32_t pci_config_address(pci_address_t address, uint8_t offset) {
            (offset & 0xFCu);
 }
 
+static uint32_t pci_initialized;
+
 void pci_init(void) {
+    if (pci_initialized != 0u) {
+        return;
+    }
+
+    pci_initialized = 1u;
     console_write("pci: config io ready\n");
 }
 

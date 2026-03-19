@@ -30,7 +30,7 @@ DISK_PERSIST_LOG2 := $(BUILD_DIR)/qemu-disk-pass2.log
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
 USER_LD_SCRIPT := src/user/user.ld
 USER_ASM_PROGRAMS := selftest child fault phase4
-USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps bootmode pwd reinstall id tty phase8
+USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps bootmode pwd reinstall id tty phase8 netinfo ping
 USER_PROGRAMS := $(USER_ASM_PROGRAMS) $(USER_C_PROGRAMS)
 USER_ASM_OBJS := $(addprefix $(BUILD_DIR)/user_asm_,$(addsuffix .o,$(USER_ASM_PROGRAMS)))
 USER_C_OBJS := $(addprefix $(BUILD_DIR)/user_c_,$(addsuffix .o,$(USER_C_PROGRAMS)))
@@ -65,6 +65,7 @@ ESP_LABEL := RIVERIX
 GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile serial terminal
 INSTALL_GRUB_CONFIG ?= grub/grub-disk.cfg
 QEMU_AHCI_DISK_ARGS := -device ahci,id=ahci0 -drive id=disk0,if=none,format=raw,file=$(DISK_IMAGE) -device ide-hd,drive=disk0,bus=ahci0.0
+QEMU_NET_ARGS := -netdev user,id=net0 -device e1000,netdev=net0
 
 CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Wextra -Werror -Iinclude
 ASFLAGS := -m32 -Iinclude
@@ -80,14 +81,16 @@ OBJS := \
 	$(BUILD_DIR)/bootinfo.o \
 	$(BUILD_DIR)/kernel.o \
 	$(BUILD_DIR)/console.o \
+	$(BUILD_DIR)/e1000.o \
 	$(BUILD_DIR)/exec.o \
 	$(BUILD_DIR)/gdt.o \
 	$(BUILD_DIR)/idt.o \
 		$(BUILD_DIR)/interrupts.o \
 		$(BUILD_DIR)/kheap.o \
 		$(BUILD_DIR)/kstack.o \
-		$(BUILD_DIR)/memory.o \
+	$(BUILD_DIR)/memory.o \
 	$(BUILD_DIR)/mmio.o \
+	$(BUILD_DIR)/net.o \
 	$(BUILD_DIR)/pci.o \
 	$(BUILD_DIR)/pic.o \
 	$(BUILD_DIR)/palloc.o \
@@ -118,6 +121,9 @@ $(BUILD_DIR)/kernel.o: src/kernel/kernel.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/console.o: src/kernel/console.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/e1000.o: src/kernel/e1000.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/block.o: src/kernel/block.c | $(BUILD_DIR)
@@ -154,6 +160,9 @@ $(BUILD_DIR)/memory.o: src/kernel/memory.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/mmio.o: src/kernel/mmio.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/net.o: src/kernel/net.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/pci.o: src/kernel/pci.c | $(BUILD_DIR)
@@ -259,7 +268,7 @@ $(OVMF_VARS): | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 
 run: $(ISO) $(OVMF_VARS)
-	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -cdrom $(ISO) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -cdrom $(ISO) $(QEMU_NET_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 disk-image: $(DISK_IMAGE)
 
@@ -273,24 +282,24 @@ install-image: $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) $(INSTA
 
 run-disk: $(DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 run-disk-ahci: $(DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) $(QEMU_AHCI_DISK_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) $(QEMU_AHCI_DISK_ARGS) $(QEMU_NET_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 run-disk-recovery: $(RECOVERY_DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) $(QEMU_NET_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 run-disk-reinstall: $(REINSTALL_DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(REINSTALL_DISK_IMAGE) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(REINSTALL_DISK_IMAGE) $(QEMU_NET_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 check: $(ISO) $(OVMF_VARS)
 	rm -f $(LOG)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -cdrom $(ISO) -serial file:$(LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -cdrom $(ISO) $(QEMU_NET_ARGS) -serial file:$(LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(LOG)
 	grep -q "memory: map complete" $(LOG)
 	grep -q "palloc: free pages" $(LOG)
@@ -352,6 +361,10 @@ check: $(ISO) $(OVMF_VARS)
 	grep -q "phase8: tty /dev/console" $(LOG)
 	grep -q "phase8: setsid ok" $(LOG)
 	grep -q "phase8: writable skipped" $(LOG)
+	grep -q "phase9: net begin" $(LOG)
+	grep -q "netinfo: ready mac" $(LOG)
+	grep -q "ping: ok 10.0.2.2" $(LOG)
+	grep -q "phase9: net end" $(LOG)
 	grep -q "phase5: ro done" $(LOG)
 	grep -q "init: rc exit 0x00000000" $(LOG)
 	grep -q "init: shell handoff" $(LOG)
@@ -365,7 +378,7 @@ check-disk: | $(BUILD_DIR)
 	$(MAKE) $(DISK_IMAGE)
 	rm -f $(DISK_LOG)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_LOG)
 	grep -q "memory: map complete" $(DISK_LOG)
 	grep -q "kheap: ready base 0x" $(DISK_LOG)
@@ -425,6 +438,10 @@ check-disk: | $(BUILD_DIR)
 	grep -q "phase8: setsid ok" $(DISK_LOG)
 	grep -q "phase8: denied ok" $(DISK_LOG)
 	grep -q "phase8: tmp ok" $(DISK_LOG)
+	grep -q "phase9: net begin" $(DISK_LOG)
+	grep -q "netinfo: ready mac" $(DISK_LOG)
+	grep -q "ping: ok 10.0.2.2" $(DISK_LOG)
+	grep -q "phase9: net end" $(DISK_LOG)
 	grep -q "phase5-disk" $(DISK_LOG)
 	grep -q "phase5: disk done" $(DISK_LOG)
 	grep -q "init: rc exit 0x00000000" $(DISK_LOG)
@@ -438,7 +455,7 @@ check-disk-ahci: | $(BUILD_DIR)
 	$(MAKE) $(DISK_IMAGE)
 	rm -f $(DISK_AHCI_LOG)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) $(QEMU_AHCI_DISK_ARGS) -serial file:$(DISK_AHCI_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) $(QEMU_AHCI_DISK_ARGS) $(QEMU_NET_ARGS) -serial file:$(DISK_AHCI_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_AHCI_LOG)
 	grep -q "vfs: root policy disk" $(DISK_AHCI_LOG)
 	grep -q "pci: config io ready" $(DISK_AHCI_LOG)
@@ -455,6 +472,10 @@ check-disk-ahci: | $(BUILD_DIR)
 	grep -q "storage: bootcount 0x00000001" $(DISK_AHCI_LOG)
 	grep -q "init: selftest exit 0x00000000" $(DISK_AHCI_LOG)
 	grep -q "phase8: tmp ok" $(DISK_AHCI_LOG)
+	grep -q "phase9: net begin" $(DISK_AHCI_LOG)
+	grep -q "netinfo: ready mac" $(DISK_AHCI_LOG)
+	grep -q "ping: ok 10.0.2.2" $(DISK_AHCI_LOG)
+	grep -q "phase9: net end" $(DISK_AHCI_LOG)
 	grep -q "phase5: disk done" $(DISK_AHCI_LOG)
 	! grep -q "ata: detected ata0" $(DISK_AHCI_LOG)
 	@printf 'check passed: %s\n' "$(DISK_AHCI_LOG)"
@@ -464,7 +485,7 @@ check-disk-recovery: | $(BUILD_DIR)
 	$(MAKE) $(RECOVERY_DISK_IMAGE)
 	rm -f $(DISK_RECOVERY_LOG)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) -serial file:$(DISK_RECOVERY_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_RECOVERY_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_RECOVERY_LOG)
 	grep -q "memory: map complete" $(DISK_RECOVERY_LOG)
 	grep -q "kheap: ready base 0x" $(DISK_RECOVERY_LOG)
@@ -507,6 +528,9 @@ check-disk-recovery: | $(BUILD_DIR)
 	grep -q "phase8: tty /dev/console" $(DISK_RECOVERY_LOG)
 	grep -q "phase8: setsid ok" $(DISK_RECOVERY_LOG)
 	grep -q "phase8: writable skipped" $(DISK_RECOVERY_LOG)
+	grep -q "phase9: recovery net begin" $(DISK_RECOVERY_LOG)
+	grep -q "netinfo: ready mac" $(DISK_RECOVERY_LOG)
+	grep -q "phase9: recovery net end" $(DISK_RECOVERY_LOG)
 	grep -q "phase6: recovery done" $(DISK_RECOVERY_LOG)
 	grep -q "init: rc exit 0x00000000" $(DISK_RECOVERY_LOG)
 	grep -q "init: shell handoff" $(DISK_RECOVERY_LOG)
@@ -519,13 +543,13 @@ check-disk-reinstall: | $(BUILD_DIR)
 	$(MAKE) $(DISK_IMAGE)
 	rm -f $(DISK_REINSTALL_LOG1) $(DISK_REINSTALL_LOG2) $(DISK_REINSTALL_LOG3)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_REINSTALL_LOG1) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_REINSTALL_LOG1) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	$(MCOPY) -o -i $(DISK_IMAGE)@@$$(( $(ESP_START_SECTOR) * 512 )) grub/grub-disk-reinstall.cfg ::/boot/grub/grub.cfg
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_REINSTALL_LOG2) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_REINSTALL_LOG2) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	$(MCOPY) -o -i $(DISK_IMAGE)@@$$(( $(ESP_START_SECTOR) * 512 )) grub/grub-disk.cfg ::/boot/grub/grub.cfg
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_REINSTALL_LOG3) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_REINSTALL_LOG3) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "vfs: rootfs mounted from disk" $(DISK_REINSTALL_LOG1)
 	grep -q "storage: bootcount 0x00000001" $(DISK_REINSTALL_LOG1)
 	grep -q "phase5-disk" $(DISK_REINSTALL_LOG1)
@@ -559,9 +583,9 @@ check-disk-persist: | $(BUILD_DIR)
 	$(MAKE) $(DISK_IMAGE)
 	rm -f $(DISK_PERSIST_LOG1) $(DISK_PERSIST_LOG2)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_PERSIST_LOG1) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_PERSIST_LOG1) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
-	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) -serial file:$(DISK_PERSIST_LOG2) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_PERSIST_LOG2) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "vfs: rootfs mounted from disk" $(DISK_PERSIST_LOG1)
 	grep -q "storage: bootcount 0x00000001" $(DISK_PERSIST_LOG1)
 	grep -q "init: child exit 0x0000002A" $(DISK_PERSIST_LOG1)

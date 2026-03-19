@@ -37,6 +37,7 @@ int32_t proc_setgid(uint32_t gid);
 int32_t proc_setsid(void);
 int32_t proc_gettty(char *buffer, uint32_t length);
 int32_t proc_pipe(int32_t *fds);
+uint32_t proc_sys_ping4(interrupt_frame_t *frame, uint32_t destination_ipv4, uint32_t timeout_ticks);
 uint32_t proc_sys_read(interrupt_frame_t *frame, uint32_t fd, uint32_t buffer_user, uint32_t length);
 uint32_t proc_sys_write(interrupt_frame_t *frame, uint32_t fd, uint32_t buffer_user, uint32_t length);
 uint32_t proc_sys_pipe(interrupt_frame_t *frame, uint32_t fds_user);

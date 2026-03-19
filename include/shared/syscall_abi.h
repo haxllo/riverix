@@ -56,6 +56,8 @@ enum {
     SYS_SETSID = 30u,
     SYS_GETTTY = 31u,
     SYS_PIPE = 32u,
+    SYS_NETINFO = 33u,
+    SYS_PING4 = 34u,
 };
 
 enum {
@@ -135,5 +137,27 @@ typedef struct sys_bootinfo {
     uint32_t root_policy;
     uint32_t flags;
 } sys_bootinfo_t;
+
+#define SYS_PING_OK 0
+#define SYS_PING_ERR_TIMEOUT (-1)
+#define SYS_PING_ERR_UNREACHABLE (-2)
+#define SYS_PING_ERR_NOT_READY (-3)
+#define SYS_PING_ERR_BUSY (-4)
+#define SYS_PING_ERR_INVALID (-5)
+
+typedef struct sys_netinfo {
+    uint32_t ready;
+    uint8_t mac[6];
+    uint8_t reserved0[2];
+    uint32_t ipv4_addr;
+    uint32_t ipv4_netmask;
+    uint32_t ipv4_gateway;
+    uint32_t arp_valid;
+    uint8_t arp_mac[6];
+    uint8_t reserved1[2];
+    uint32_t arp_ipv4;
+    uint32_t rx_packets;
+    uint32_t tx_packets;
+} sys_netinfo_t;
 
 #endif
