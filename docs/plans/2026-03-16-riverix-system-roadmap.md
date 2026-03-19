@@ -358,15 +358,11 @@ These should happen continuously instead of being postponed to the end:
 
 If we continue right now, the best order is:
 
-1. Writable `simplefs`
-2. `exit` and `wait`
-3. User-visible `exec`
-4. `fork`
-5. File syscalls and cwd
-6. Tiny shell and core userland tools
-7. Better install/persistence tooling
+1. Start Phase 9 networking with a narrow QEMU-first NIC path
+2. Keep Phase 8 tty/permission/pipeline semantics stable under that load
+3. Strengthen storage internals once the next wider userland slice starts leaning on them
 
-That order keeps the critical path on storage and process reality instead of breadth.
+That order keeps the next critical path on a new subsystem while preserving the now-real local Unix environment.
 
 ## What Can Change Later
 

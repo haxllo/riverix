@@ -407,7 +407,7 @@ int exec_load_path(uint32_t directory_phys, const char *path, exec_image_t *imag
 
     exec_reset_image(image);
 
-    if (vfs_open_path(&file, path, VFS_O_RDONLY) != 0) {
+    if (vfs_open_path(&file, path, VFS_O_RDONLY, 0) != 0) {
         console_write("exec: missing ");
         console_write(path);
         console_write("\n");

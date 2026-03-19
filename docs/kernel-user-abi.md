@@ -1,7 +1,7 @@
 # Kernel/User ABI
 
-This document records the current Riverix syscall ABI as of the current Phase 6
-recovery-and-reinstall slice. The goal is
+This document records the current Riverix syscall ABI as of the current Phase 8
+tty/permission/pipeline slice. The goal is
 stability for the existing numbers and honest documentation of the current
 semantics and limits.
 
@@ -44,6 +44,13 @@ semantics and limits.
 | 23     | `bootinfo` | `bootinfo_ptr`                       | `0` or `-1` |
 | 24     | `getcwd` | `buffer`, `length`                     | bytes written, excluding the trailing null, or `-1` |
 | 25     | `reinstall_rootfs` | none                          | `0` or `-1` |
+| 26     | `getuid` | none                                  | current uid |
+| 27     | `getgid` | none                                  | current gid |
+| 28     | `setuid` | `uid`                                 | `0` or `-1` |
+| 29     | `setgid` | `gid`                                 | `0` or `-1` |
+| 30     | `setsid` | none                                  | new session id or `-1` |
+| 31     | `gettty` | `buffer`, `length`                    | bytes written, excluding the trailing null, or `-1` |
+| 32     | `pipe`   | `fds_ptr`                             | `0` or `-1` |
 
 ## Flags and structs
 
@@ -75,6 +82,10 @@ typedef struct sys_stat {
     uint32_t kind;
     uint32_t size;
     uint32_t child_count;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t links;
 } sys_stat_t;
 ```
 
@@ -90,6 +101,10 @@ Current `kind` values:
 typedef struct sys_dirent {
     uint32_t kind;
     uint32_t size;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t links;
     char name[32];
 } sys_dirent_t;
 ```
@@ -100,10 +115,15 @@ typedef struct sys_dirent {
 typedef struct sys_procinfo {
     uint32_t pid;
     uint32_t parent_pid;
+    uint32_t sid;
+    uint32_t pgid;
     uint32_t state;
     uint32_t kind;
     uint32_t run_ticks;
+    uint32_t uid;
+    uint32_t gid;
     char name[32];
+    char tty[32];
 } sys_procinfo_t;
 ```
 
@@ -141,6 +161,19 @@ Current boot flags:
 - `0x1`: recovery mode
 - `0x2`: scripted reinstall mode
 
+### Mode bits
+
+- `SYS_MODE_IRUSR = 0x100`
+- `SYS_MODE_IWUSR = 0x080`
+- `SYS_MODE_IXUSR = 0x040`
+- `SYS_MODE_IRGRP = 0x020`
+- `SYS_MODE_IWGRP = 0x010`
+- `SYS_MODE_IXGRP = 0x008`
+- `SYS_MODE_IROTH = 0x004`
+- `SYS_MODE_IWOTH = 0x002`
+- `SYS_MODE_IXOTH = 0x001`
+- `SYS_MODE_ISVTX = 0x200`
+
 ## Path semantics
 
 - Absolute and relative paths are supported.
@@ -151,11 +184,21 @@ Current boot flags:
 - `getcwd` returns the normalized current cwd string.
 - `.` and `..` are supported.
 - Duplicate `/` separators are normalized.
+- `/dev/tty` is task-relative and resolves against the current task's controlling tty.
 
 ## Current behavior notes
 
-- `fd 0`, `fd 1`, and `fd 2` are attached to `/dev/console` at task creation.
-- `/dev/console` now supports line-buffered reads over COM1 in addition to writes.
+- `fd 0`, `fd 1`, and `fd 2` are attached to the controlling console device at task creation.
+- `/dev/console` reads now return `WOULD_BLOCK` internally when no serial input is ready, and
+  the proc layer turns that into blocking task sleep/resume instead of busy-waiting in kernel mode.
+- `pipe()` returns a read end and a write end backed by an in-memory ring buffer.
+- `read` and `write` on pipes block in-kernel until data or space becomes available.
+- `read` returns EOF when the last pipe writer closes.
+- `write` fails when the last pipe reader closes.
+- `setsid` creates a new session/process group and detaches the calling task from its controlling tty.
+- `setuid` and `setgid` are root-only operations in the current kernel.
+- The VFS enforces mode-bit checks for path traversal, open, create, unlink, truncate, and directory mutation.
+- Sticky `/tmp` semantics are implemented for unlink inside sticky directories.
 - The ISO boot path mounts the rootfs read-only, so `open(..., O_CREATE)`,
   `mkdir`, `unlink`, and truncating writes fail there by design.
 - The disk-image boot path mounts `simplefs` read-write and supports file create,
@@ -204,3 +247,11 @@ The current Phase 6 recovery-and-reinstall slice adds:
 - `/etc/rc-reinstall` when `recovery=1 reinstall=1` is present
 - user tools `/bin/bootmode`, `/bin/pwd`, and `/bin/reinstall`
 - the `reinstall_rootfs` syscall for full rootfs restoration from recovery mode
+
+The current Phase 8 tty/permission/pipeline slice adds:
+
+- `getuid`, `getgid`, `setuid`, `setgid`, `setsid`, `gettty`, and `pipe`
+- uid/gid plus session/process-group/tty fields in `procinfo`
+- mode, uid, gid, and link-count fields in `stat` and `readdir`
+- shell pipeline support with `|`
+- user tools `/bin/id`, `/bin/tty`, and `/bin/phase8`

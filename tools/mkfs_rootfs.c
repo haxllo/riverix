@@ -10,8 +10,9 @@
 #define ROOTFS_DEV_INODE 2u
 #define ROOTFS_VAR_INODE 3u
 #define ROOTFS_ETC_INODE 4u
-#define ROOTFS_FIRST_FILE_INODE 5u
-#define ROOTFS_ROOT_CHILD_COUNT 4u
+#define ROOTFS_TMP_INODE 5u
+#define ROOTFS_FIRST_FILE_INODE 6u
+#define ROOTFS_ROOT_CHILD_COUNT 5u
 #define ROOTFS_MAX_BIN_FILES (ROOTFS_TOTAL_INODES - ROOTFS_FIRST_FILE_INODE)
 #define ROOTFS_DEFAULT_TOTAL_BLOCKS 32768u
 
@@ -389,20 +390,39 @@ int main(int argc, char **argv) {
     inodes[ROOTFS_ROOT_INODE].data_block = root_dir_block;
     inodes[ROOTFS_ROOT_INODE].block_count = 1u;
     inodes[ROOTFS_ROOT_INODE].child_count = ROOTFS_ROOT_CHILD_COUNT;
+    inodes[ROOTFS_ROOT_INODE].mode = 0755u;
+    inodes[ROOTFS_ROOT_INODE].uid = 0u;
+    inodes[ROOTFS_ROOT_INODE].gid = 0u;
 
     inodes[ROOTFS_BIN_INODE].kind = SIMPLEFS_INODE_DIR;
     inodes[ROOTFS_BIN_INODE].size = bin_file_count * sizeof(simplefs_dir_entry_disk_t);
     inodes[ROOTFS_BIN_INODE].data_block = bin_dir_block;
     inodes[ROOTFS_BIN_INODE].block_count = bin_dir_blocks;
     inodes[ROOTFS_BIN_INODE].child_count = bin_file_count;
+    inodes[ROOTFS_BIN_INODE].mode = 0755u;
+    inodes[ROOTFS_BIN_INODE].uid = 0u;
+    inodes[ROOTFS_BIN_INODE].gid = 0u;
 
     inodes[ROOTFS_DEV_INODE].kind = SIMPLEFS_INODE_DIR;
+    inodes[ROOTFS_DEV_INODE].mode = 0755u;
+    inodes[ROOTFS_DEV_INODE].uid = 0u;
+    inodes[ROOTFS_DEV_INODE].gid = 0u;
     inodes[ROOTFS_VAR_INODE].kind = SIMPLEFS_INODE_DIR;
+    inodes[ROOTFS_VAR_INODE].mode = 0755u;
+    inodes[ROOTFS_VAR_INODE].uid = 0u;
+    inodes[ROOTFS_VAR_INODE].gid = 0u;
     inodes[ROOTFS_ETC_INODE].kind = SIMPLEFS_INODE_DIR;
     inodes[ROOTFS_ETC_INODE].size = etc_file_count * sizeof(simplefs_dir_entry_disk_t);
     inodes[ROOTFS_ETC_INODE].data_block = etc_dir_blocks == 0u ? 0u : etc_dir_block;
     inodes[ROOTFS_ETC_INODE].block_count = etc_dir_blocks;
     inodes[ROOTFS_ETC_INODE].child_count = etc_file_count;
+    inodes[ROOTFS_ETC_INODE].mode = 0755u;
+    inodes[ROOTFS_ETC_INODE].uid = 0u;
+    inodes[ROOTFS_ETC_INODE].gid = 0u;
+    inodes[ROOTFS_TMP_INODE].kind = SIMPLEFS_INODE_DIR;
+    inodes[ROOTFS_TMP_INODE].mode = 01777u;
+    inodes[ROOTFS_TMP_INODE].uid = 0u;
+    inodes[ROOTFS_TMP_INODE].gid = 0u;
 
     root_entries[0].inode_index = ROOTFS_BIN_INODE;
     copy_bytes(root_entries[0].name, "bin", 3u);
@@ -412,6 +432,8 @@ int main(int argc, char **argv) {
     copy_bytes(root_entries[2].name, "var", 3u);
     root_entries[3].inode_index = ROOTFS_ETC_INODE;
     copy_bytes(root_entries[3].name, "etc", 3u);
+    root_entries[4].inode_index = ROOTFS_TMP_INODE;
+    copy_bytes(root_entries[4].name, "tmp", 3u);
 
     bin_file_count = 0u;
     etc_file_count = 0u;
@@ -422,6 +444,9 @@ int main(int argc, char **argv) {
         inodes[files[index].inode_index].size = files[index].length;
         inodes[files[index].inode_index].data_block = files[index].data_block;
         inodes[files[index].inode_index].block_count = files[index].block_count;
+        inodes[files[index].inode_index].mode = files[index].parent_inode_index == ROOTFS_BIN_INODE ? 0755u : 0644u;
+        inodes[files[index].inode_index].uid = 0u;
+        inodes[files[index].inode_index].gid = 0u;
 
         if (files[index].parent_inode_index == ROOTFS_BIN_INODE) {
             bin_entries[bin_file_count].inode_index = files[index].inode_index;

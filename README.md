@@ -86,7 +86,13 @@ the kernel has early PCI config-space discovery plus a shared MMIO mapping windo
 storage bring-up now prefers a PCI AHCI controller path before falling back to legacy ATA
 PIO. The same GPT/simplefs installed image is now verified through both the ATA PIO path
 and a QEMU AHCI path, so the storage stack is no longer tied to a single narrow legacy
-disk path.
+disk path. Phase 8 is now in place too: user tasks carry uid/gid, session, process-group,
+and controlling-tty metadata; `/dev/tty` is resolved against the current task; `setsid`,
+`getuid`, `getgid`, `setuid`, `setgid`, `gettty`, and `pipe` are part of the syscall ABI;
+the VFS enforces Unix-style mode-bit checks plus sticky `/tmp` rules; the shell now has a
+cleaner `riverix:/cwd#` or `$` prompt and can launch real pipelines; and the shipped
+userspace now includes `id`, `tty`, and `/bin/phase8`, which proves session handling plus
+non-root permission enforcement on the writable disk path.
 
 ## Why this shape
 
@@ -206,13 +212,13 @@ The `check` target boots the ISO in headless QEMU, captures serial output, and v
 the Multiboot rootfs module handoff, block-device registration, filesystem mount, ELF
 loading of `/bin/init`, the `fork` -> `exec("/bin/child")` -> `waitpid` lifecycle, the
 faulting `/bin/fault` user program with kill-on-fault recovery, the COW fork proof, the
-Phase 4 `/bin/phase4` ABI proof on the read-only rootfs path, and timer-driven scheduler
-activity.
+Phase 4 `/bin/phase4` ABI proof on the read-only rootfs path, the Phase 8 shell pipeline
+and tty/session markers on the read-only boot, and timer-driven scheduler activity.
 
 The `check-disk` target boots the raw disk image in headless QEMU and verifies the ATA
 PIO fallback path, GPT rootfs partition discovery, disk-backed `simplefs` mount, the same
-user-mode process lifecycle, the writable Phase 4 filesystem/fd proof, and timer-driven
-scheduler activity.
+user-mode process lifecycle, the writable Phase 4 filesystem/fd proof, the Phase 8
+non-root `/etc` denial plus `/tmp` write proof, and timer-driven scheduler activity.
 
 The `check-disk-ahci` target boots the same installed disk image behind QEMU's AHCI
 controller, verifies PCI discovery plus MMIO-backed AHCI bring-up, and confirms that the
@@ -254,11 +260,12 @@ See `docs/plans/2026-03-19-phase-6-install-and-recovery.md` for the current Phas
 See `docs/plans/2026-03-19-phase-6-recovery-userland.md` for the current recovery-userland slice.
 See `docs/plans/2026-03-19-phase-6-reinstall-path.md` for the current recovery reinstall slice.
 See `docs/plans/2026-03-19-phase-7-storage-controller-path.md` for the Phase 7 storage-controller work.
+See `docs/plans/2026-03-19-phase-8-tty-permissions-pipes.md` for the Phase 8 implementation plan.
 See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Start Phase 8 with TTY/session groundwork so the shell stops depending on a hardcoded single-console model.
-2. Add permission bits plus a basic uid/gid model before widening the shell and tool surface further.
-3. Add `pipe` and shell pipelines so the userland path starts to behave like a real Unix environment.
-4. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
+1. Start Phase 9 with a minimal QEMU-first networking path instead of widening local-only userland further.
+2. Keep the new tty/permission/pipeline semantics stable while growing the syscall and tool surface.
+3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
+4. Keep reducing hardcoded limits in kernel subsystems that still assume a very small userland.

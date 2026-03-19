@@ -7,6 +7,16 @@ echo phase5: ls end
 echo phase5: ps begin
 ps
 echo phase5: ps end
+echo phase8: pipe begin
+echo phase8-pipe | cat
+echo phase8: pipe end
+echo phase8: tty begin
+tty
+echo phase8: tty end
+echo phase8: id begin
+id
+echo phase8: id end
+phase8
 mkdir /var/phase5-dir
 echo phase5-disk > /var/phase5-dir/note
 cat /var/phase5-dir/note

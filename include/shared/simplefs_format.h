@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define SIMPLEFS_MAGIC 0x31534653u
-#define SIMPLEFS_VERSION 2u
+#define SIMPLEFS_VERSION 3u
 #define SIMPLEFS_BLOCK_SIZE 512u
 #define SIMPLEFS_NAME_MAX 28u
 
@@ -37,7 +37,9 @@ typedef struct simplefs_inode_disk {
     uint32_t data_block;
     uint32_t block_count;
     uint32_t child_count;
-    uint32_t reserved[3];
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
 } __attribute__((packed)) simplefs_inode_disk_t;
 
 typedef struct simplefs_dir_entry_disk {

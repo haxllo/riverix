@@ -8,8 +8,6 @@
 #include "kernel/usercopy.h"
 #include "kernel/vfs.h"
 
-#define SYSCALL_IO_CHUNK 256u
-
 _Static_assert((int)SYS_O_RDONLY == (int)VFS_O_RDONLY, "syscall and VFS read flag mismatch");
 _Static_assert((int)SYS_O_WRONLY == (int)VFS_O_WRONLY, "syscall and VFS write flag mismatch");
 _Static_assert((int)SYS_O_CREATE == (int)VFS_O_CREATE, "syscall and VFS create flag mismatch");
@@ -42,88 +40,6 @@ static int copy_path_from_frame(const interrupt_frame_t *frame, uint32_t path_ad
     return 0;
 }
 
-static int32_t sys_write_handler(const interrupt_frame_t *frame, uint32_t fd, uint32_t buffer_address, uint32_t length) {
-    char staging[SYSCALL_IO_CHUNK];
-    const char *buffer = (const char *)(uintptr_t)buffer_address;
-    uint32_t written = 0u;
-
-    if (buffer == 0) {
-        return -1;
-    }
-
-    while (written < length) {
-        uint32_t chunk = length - written;
-        int32_t write_result;
-
-        if (chunk > sizeof(staging)) {
-            chunk = sizeof(staging);
-        }
-
-        if (interrupt_from_user(frame)) {
-            if (user_copy_from(staging, buffer_address + written, chunk) != 0) {
-                return written != 0u ? (int32_t)written : -1;
-            }
-        } else {
-            copy_bytes(staging, &buffer[written], chunk);
-        }
-
-        write_result = proc_write_fd(fd, staging, chunk);
-        if (write_result < 0) {
-            return written != 0u ? (int32_t)written : -1;
-        }
-
-        written += (uint32_t)write_result;
-        if ((uint32_t)write_result < chunk) {
-            break;
-        }
-    }
-
-    return (int32_t)written;
-}
-
-static int32_t sys_read_handler(const interrupt_frame_t *frame, uint32_t fd, uint32_t buffer_address, uint32_t length) {
-    char staging[SYSCALL_IO_CHUNK];
-    char *buffer = (char *)(uintptr_t)buffer_address;
-    uint32_t read_total = 0u;
-
-    if (buffer == 0) {
-        return -1;
-    }
-
-    while (read_total < length) {
-        uint32_t chunk = length - read_total;
-        int32_t read_result;
-
-        if (chunk > sizeof(staging)) {
-            chunk = sizeof(staging);
-        }
-
-        read_result = proc_read_fd(fd, staging, chunk);
-        if (read_result < 0) {
-            return read_total != 0u ? (int32_t)read_total : -1;
-        }
-
-        if (read_result == 0) {
-            break;
-        }
-
-        if (interrupt_from_user(frame)) {
-            if (user_copy_to(buffer_address + read_total, staging, (uint32_t)read_result) != 0) {
-                return read_total != 0u ? (int32_t)read_total : -1;
-            }
-        } else {
-            copy_bytes(&buffer[read_total], staging, (uint32_t)read_result);
-        }
-
-        read_total += (uint32_t)read_result;
-        if ((uint32_t)read_result < chunk) {
-            break;
-        }
-    }
-
-    return (int32_t)read_total;
-}
-
 static int32_t sys_stat_handler(const interrupt_frame_t *frame, uint32_t path_address, uint32_t stat_address) {
     char path[VFS_PATH_MAX];
     vfs_stat_t kernel_stat;
@@ -140,6 +56,10 @@ static int32_t sys_stat_handler(const interrupt_frame_t *frame, uint32_t path_ad
     user_stat.kind = kernel_stat.kind;
     user_stat.size = kernel_stat.size;
     user_stat.child_count = kernel_stat.child_count;
+    user_stat.mode = kernel_stat.mode;
+    user_stat.uid = kernel_stat.uid;
+    user_stat.gid = kernel_stat.gid;
+    user_stat.links = kernel_stat.links;
 
     if (interrupt_from_user(frame)) {
         return user_copy_to(stat_address, &user_stat, sizeof(user_stat)) == 0 ? 0 : -1;
@@ -231,13 +151,33 @@ static int32_t sys_getcwd_handler(const interrupt_frame_t *frame, uint32_t buffe
     return result;
 }
 
+static int32_t sys_gettty_handler(const interrupt_frame_t *frame, uint32_t buffer_address, uint32_t buffer_length) {
+    char tty[SYS_NAME_MAX];
+    int32_t result;
+
+    if (buffer_address == 0u || buffer_length == 0u) {
+        return -1;
+    }
+
+    result = proc_gettty(tty, sizeof(tty));
+    if (result < 0 || ((uint32_t)result + 1u) > buffer_length) {
+        return -1;
+    }
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(buffer_address, tty, (uint32_t)result + 1u) == 0 ? result : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)buffer_address, tty, (uint32_t)result + 1u);
+    return result;
+}
+
 uint32_t syscall_dispatch(interrupt_frame_t *frame) {
     char path[VFS_PATH_MAX];
 
     switch (frame->eax) {
     case SYS_WRITE:
-        frame->eax = (uint32_t)sys_write_handler(frame, frame->ebx, frame->ecx, frame->edx);
-        return (uint32_t)(uintptr_t)frame;
+        return proc_sys_write(frame, frame->ebx, frame->ecx, frame->edx);
     case SYS_GETPID:
         frame->eax = proc_current_pid();
         return (uint32_t)(uintptr_t)frame;
@@ -265,8 +205,7 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
         frame->eax = (uint32_t)proc_close_fd(frame->ebx);
         return (uint32_t)(uintptr_t)frame;
     case SYS_READ:
-        frame->eax = (uint32_t)sys_read_handler(frame, frame->ebx, frame->ecx, frame->edx);
-        return (uint32_t)(uintptr_t)frame;
+        return proc_sys_read(frame, frame->ebx, frame->ecx, frame->edx);
     case SYS_LSEEK:
         frame->eax = (uint32_t)proc_seek_fd(frame->ebx, (int32_t)frame->ecx, frame->edx);
         return (uint32_t)(uintptr_t)frame;
@@ -320,6 +259,26 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
     case SYS_REINSTALL_ROOTFS:
         frame->eax = (uint32_t)vfs_reinstall_rootfs();
         return (uint32_t)(uintptr_t)frame;
+    case SYS_GETUID:
+        frame->eax = proc_getuid();
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_GETGID:
+        frame->eax = proc_getgid();
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_SETUID:
+        frame->eax = (uint32_t)proc_setuid(frame->ebx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_SETGID:
+        frame->eax = (uint32_t)proc_setgid(frame->ebx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_SETSID:
+        frame->eax = (uint32_t)proc_setsid();
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_GETTTY:
+        frame->eax = (uint32_t)sys_gettty_handler(frame, frame->ebx, frame->ecx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_PIPE:
+        return proc_sys_pipe(frame, frame->ebx);
     default:
         frame->eax = (uint32_t)-1;
         return (uint32_t)(uintptr_t)frame;

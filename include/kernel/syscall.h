@@ -83,6 +83,55 @@ static inline int32_t sys_read(uint32_t fd, void *buffer, uint32_t length) {
     return result;
 }
 
+static inline uint32_t sys_getuid(void) {
+    uint32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_GETUID) : "memory");
+    return result;
+}
+
+static inline uint32_t sys_getgid(void) {
+    uint32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_GETGID) : "memory");
+    return result;
+}
+
+static inline int32_t sys_setuid(uint32_t uid) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_SETUID), "b"(uid) : "memory");
+    return result;
+}
+
+static inline int32_t sys_setgid(uint32_t gid) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_SETGID), "b"(gid) : "memory");
+    return result;
+}
+
+static inline int32_t sys_setsid(void) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_SETSID) : "memory");
+    return result;
+}
+
+static inline int32_t sys_gettty(char *buffer, uint32_t length) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_GETTTY), "b"(buffer), "c"(length) : "memory");
+    return result;
+}
+
+static inline int32_t sys_pipe(int32_t *fds) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_PIPE), "b"(fds) : "memory");
+    return result;
+}
+
 static inline int32_t sys_lseek(uint32_t fd, int32_t offset, uint32_t whence) {
     int32_t result;
 

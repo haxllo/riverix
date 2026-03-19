@@ -6,7 +6,7 @@
 #include "shared/simplefs_format.h"
 
 #define SIMPLEFS_MAX_MOUNT_INODES 64u
-#define SIMPLEFS_DIRECTORY_CAPACITY 16u
+#define SIMPLEFS_DIRECTORY_CAPACITY 32u
 #define SIMPLEFS_MAX_DIRECTORY_SLOTS 16u
 #define SIMPLEFS_MAX_MOUNT_DIRENTS (SIMPLEFS_DIRECTORY_CAPACITY * SIMPLEFS_MAX_DIRECTORY_SLOTS)
 #define SIMPLEFS_MAX_MOUNT_BLOCKS 32768u
@@ -35,7 +35,12 @@ static uint8_t block_scratch[SIMPLEFS_BLOCK_SIZE];
 
 static int32_t simplefs_regular_read(vfs_file_t *file, void *buffer, uint32_t length);
 static int32_t simplefs_regular_write(vfs_file_t *file, const char *buffer, uint32_t length);
-static int32_t simplefs_create_child(vfs_inode_t *directory, const char *name, vfs_inode_kind_t kind, vfs_inode_t **out_inode);
+static int32_t simplefs_create_child(vfs_inode_t *directory,
+                                     const char *name,
+                                     vfs_inode_kind_t kind,
+                                     uint32_t mode,
+                                     const vfs_credentials_t *credentials,
+                                     vfs_inode_t **out_inode);
 static int32_t simplefs_remove_child(vfs_inode_t *directory, const char *name);
 static int32_t simplefs_resize_inode(vfs_inode_t *inode, uint32_t size);
 
@@ -291,21 +296,33 @@ static int32_t simplefs_alloc_dir_slots(simplefs_runtime_inode_t *directory) {
     return 0;
 }
 
+static uint32_t simplefs_dir_required_blocks(uint32_t entry_count) {
+    if (entry_count == 0u) {
+        return 0u;
+    }
+
+    return align_up(entry_count * sizeof(simplefs_dir_entry_disk_t), SIMPLEFS_BLOCK_SIZE) / SIMPLEFS_BLOCK_SIZE;
+}
+
 static int32_t simplefs_read_dir_entries(simplefs_runtime_inode_t *directory, simplefs_dir_entry_disk_t *entries, uint32_t entry_count) {
+    uint32_t required_blocks;
+
     if (entry_count == 0u) {
         return 0;
     }
 
-    if (directory->disk.data_block == 0u || directory->disk.block_count != 1u) {
+    required_blocks = simplefs_dir_required_blocks(entry_count);
+    if (directory->disk.data_block == 0u || directory->disk.block_count != required_blocks) {
         return -1;
     }
 
-    zero_bytes(entries, SIMPLEFS_BLOCK_SIZE);
-    return simplefs_read_blocks(directory->disk.data_block, 1u, entries);
+    zero_bytes(entries, sizeof(simplefs_dir_entry_disk_t) * SIMPLEFS_DIRECTORY_CAPACITY);
+    return simplefs_read_blocks(directory->disk.data_block, required_blocks, entries);
 }
 
 static int32_t simplefs_write_dir_entries(simplefs_runtime_inode_t *directory, const simplefs_dir_entry_disk_t *entries, uint32_t entry_count) {
-    uint32_t required_blocks = entry_count == 0u ? 0u : 1u;
+    uint32_t required_blocks = simplefs_dir_required_blocks(entry_count);
+    uint32_t block_index;
 
     if (mounted_device == 0 || mounted_device->read_only != 0u || directory->disk.kind != SIMPLEFS_INODE_DIR) {
         return -1;
@@ -319,25 +336,30 @@ static int32_t simplefs_write_dir_entries(simplefs_runtime_inode_t *directory, c
         if (directory->disk.block_count != 0u) {
             simplefs_release_extent(directory);
         }
-    } else if (directory->disk.block_count == 0u) {
+    } else if (directory->disk.block_count != required_blocks) {
         uint32_t start_block;
 
-        if (simplefs_allocate_extent(1u, &start_block) != 0) {
+        if (directory->disk.block_count != 0u) {
+            simplefs_release_extent(directory);
+        }
+
+        if (simplefs_allocate_extent(required_blocks, &start_block) != 0) {
             return -1;
         }
 
         directory->disk.data_block = start_block;
-        directory->disk.block_count = 1u;
-        if (simplefs_zero_block(directory->disk.data_block) != 0) {
-            simplefs_release_extent(directory);
-            return -1;
+        directory->disk.block_count = required_blocks;
+        for (block_index = 0u; block_index < required_blocks; block_index++) {
+            if (simplefs_zero_block(directory->disk.data_block + block_index) != 0) {
+                simplefs_release_extent(directory);
+                return -1;
+            }
         }
     }
 
     if (required_blocks != 0u) {
-        zero_bytes(block_scratch, sizeof(block_scratch));
-        copy_bytes(block_scratch, entries, entry_count * sizeof(simplefs_dir_entry_disk_t));
-        if (simplefs_write_blocks(directory->disk.data_block, 1u, block_scratch) != 0) {
+        if (simplefs_write_blocks(directory->disk.data_block, required_blocks, entries) != 0) {
+            simplefs_release_extent(directory);
             return -1;
         }
     }
@@ -451,6 +473,10 @@ static void simplefs_reset_runtime_inode(simplefs_runtime_inode_t *node, uint32_
     node->vfs.children = 0;
     node->vfs.child_count = 0u;
     node->vfs.child_capacity = 0u;
+    node->vfs.mode = 0u;
+    node->vfs.uid = 0u;
+    node->vfs.gid = 0u;
+    node->vfs.links = 0u;
     node->vfs.private_data = node;
 }
 
@@ -710,7 +736,12 @@ static int32_t simplefs_regular_write(vfs_file_t *file, const char *buffer, uint
     return (int32_t)written;
 }
 
-static int32_t simplefs_create_child(vfs_inode_t *directory_inode, const char *name, vfs_inode_kind_t kind, vfs_inode_t **out_inode) {
+static int32_t simplefs_create_child(vfs_inode_t *directory_inode,
+                                     const char *name,
+                                     vfs_inode_kind_t kind,
+                                     uint32_t mode,
+                                     const vfs_credentials_t *credentials,
+                                     vfs_inode_t **out_inode) {
     simplefs_runtime_inode_t *directory;
     simplefs_runtime_inode_t *child;
     simplefs_dir_entry_disk_t entries[SIMPLEFS_DIRECTORY_CAPACITY];
@@ -749,6 +780,13 @@ static int32_t simplefs_create_child(vfs_inode_t *directory_inode, const char *n
     child->vfs.kind = kind;
     child->vfs.ops = kind == VFS_INODE_REG ? &simplefs_file_ops : 0;
     child->vfs.inode_ops = &simplefs_inode_ops;
+    child->disk.mode = mode;
+    child->disk.uid = credentials != 0 ? credentials->uid : 0u;
+    child->disk.gid = credentials != 0 ? credentials->gid : 0u;
+    child->vfs.mode = child->disk.mode;
+    child->vfs.uid = child->disk.uid;
+    child->vfs.gid = child->disk.gid;
+    child->vfs.links = 1u;
     simplefs_set_inode_name(child, name);
 
     entries[directory->disk.child_count].inode_index = (uint32_t)child_inode_index;
@@ -936,6 +974,10 @@ int32_t simplefs_mount(block_device_t *device, vfs_inode_t **out_root) {
         simplefs_reset_runtime_inode(node, index);
         node->disk = disk_inodes[index];
         node->vfs.size = node->disk.size;
+        node->vfs.mode = node->disk.mode;
+        node->vfs.uid = node->disk.uid;
+        node->vfs.gid = node->disk.gid;
+        node->vfs.links = 1u;
 
         if (!simplefs_inode_used(index)) {
             continue;

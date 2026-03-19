@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    putstr_fd(1, "PID      PPID     STATE     KIND NAME\n");
+    putstr_fd(1, "PID      PPID     UID      GID      SID      PGID     STATE     KIND TTY          NAME\n");
     for (;;) {
         procinfo_t info;
         int32_t result = procinfo(index, &info);
@@ -49,9 +49,19 @@ int main(int argc, char **argv) {
         putstr_fd(1, " ");
         puthex32(info.parent_pid);
         putstr_fd(1, " ");
+        puthex32(info.uid);
+        putstr_fd(1, " ");
+        puthex32(info.gid);
+        putstr_fd(1, " ");
+        puthex32(info.sid);
+        putstr_fd(1, " ");
+        puthex32(info.pgid);
+        putstr_fd(1, " ");
         putstr_fd(1, state_name(info.state));
         putstr_fd(1, " ");
         putstr_fd(1, kind_name(info.kind));
+        putstr_fd(1, " ");
+        putstr_fd(1, info.tty[0] != '\0' ? info.tty : "-");
         putstr_fd(1, " ");
         putstr_fd(1, info.name);
         putstr_fd(1, "\n");

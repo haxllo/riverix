@@ -4,6 +4,12 @@ bootmode
 echo phase6: reinstall pwd begin
 pwd
 echo phase6: reinstall pwd end
+echo phase8: pipe begin
+echo phase8-reinstall | cat
+echo phase8: pipe end
+tty
+id
+phase8
 echo phase6: reinstall begin
 reinstall
 echo phase6: reinstall done

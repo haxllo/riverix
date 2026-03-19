@@ -22,5 +22,12 @@ int32_t dup(int32_t fd);
 int32_t dup2(int32_t oldfd, int32_t newfd);
 int32_t sleep(uint32_t ticks);
 uint32_t ticks(void);
+uint32_t getuid(void);
+uint32_t getgid(void);
+int32_t setuid(uint32_t uid);
+int32_t setgid(uint32_t gid);
+int32_t setsid(void);
+int32_t gettty(char *buffer, uint32_t length);
+int32_t pipe(int32_t fds[2]);
 
 #endif

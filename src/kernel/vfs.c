@@ -14,8 +14,10 @@
 
 static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t length);
 static int32_t console_inode_write(vfs_file_t *file, const char *buffer, uint32_t length);
-static const vfs_inode_t *vfs_resolve_path(const char *path);
-static int32_t vfs_resolve_parent(const char *path, vfs_inode_t **out_parent, char *leaf_name);
+static int32_t pipe_inode_read(vfs_file_t *file, void *buffer, uint32_t length);
+static int32_t pipe_inode_write(vfs_file_t *file, const char *buffer, uint32_t length);
+static const vfs_inode_t *vfs_resolve_path(const char *path, const vfs_credentials_t *credentials);
+static int32_t vfs_resolve_parent(const char *path, const vfs_credentials_t *credentials, vfs_inode_t **out_parent, char *leaf_name);
 static int32_t vfs_append_child(vfs_inode_t *directory, vfs_inode_t *child);
 static int32_t vfs_mount_root(vfs_inode_t **out_root, block_device_t *device);
 static int32_t vfs_ensure_disk_rootfs_device(block_device_t **out_device);
@@ -26,6 +28,21 @@ static const vfs_file_ops_t console_ops = {
     .read = console_inode_read,
     .write = console_inode_write,
 };
+
+static const vfs_file_ops_t pipe_ops = {
+    .read = pipe_inode_read,
+    .write = pipe_inode_write,
+};
+
+typedef struct vfs_pipe {
+    vfs_inode_t inode;
+    uint32_t reader_count;
+    uint32_t writer_count;
+    uint32_t read_index;
+    uint32_t write_index;
+    uint32_t buffered;
+    uint8_t buffer[VFS_PIPE_BUFFER_SIZE];
+} vfs_pipe_t;
 
 static vfs_inode_t *root_inode;
 static uint32_t root_writable;
@@ -41,6 +58,27 @@ static vfs_inode_t console_inode = {
     .children = 0,
     .child_count = 0u,
     .child_capacity = 0u,
+    .mode = VFS_MODE_IRUSR | VFS_MODE_IWUSR | VFS_MODE_IRGRP | VFS_MODE_IWGRP | VFS_MODE_IROTH | VFS_MODE_IWOTH,
+    .uid = 0u,
+    .gid = 0u,
+    .links = 1u,
+    .private_data = 0,
+};
+static vfs_inode_t tty_inode = {
+    .name = "tty",
+    .kind = VFS_INODE_DEV,
+    .ops = &console_ops,
+    .inode_ops = 0,
+    .ref_count = 0u,
+    .data = 0,
+    .size = 0u,
+    .children = 0,
+    .child_count = 0u,
+    .child_capacity = 0u,
+    .mode = VFS_MODE_IRUSR | VFS_MODE_IWUSR | VFS_MODE_IRGRP | VFS_MODE_IWGRP | VFS_MODE_IROTH | VFS_MODE_IWOTH,
+    .uid = 0u,
+    .gid = 0u,
+    .links = 1u,
     .private_data = 0,
 };
 
@@ -130,6 +168,73 @@ static void format_hex32(char *buffer, uint32_t value) {
     }
 }
 
+static int vfs_is_superuser(const vfs_credentials_t *credentials) {
+    return credentials == 0 || credentials->uid == 0u;
+}
+
+static uint32_t vfs_allowed_access(const vfs_inode_t *inode, const vfs_credentials_t *credentials) {
+    uint32_t allowed = 0u;
+    uint32_t mode;
+
+    if (inode == 0) {
+        return 0u;
+    }
+
+    if (vfs_is_superuser(credentials)) {
+        return VFS_ACCESS_READ | VFS_ACCESS_WRITE | VFS_ACCESS_EXEC;
+    }
+
+    mode = inode->mode;
+    if (credentials->uid == inode->uid) {
+        if ((mode & VFS_MODE_IRUSR) != 0u) {
+            allowed |= VFS_ACCESS_READ;
+        }
+        if ((mode & VFS_MODE_IWUSR) != 0u) {
+            allowed |= VFS_ACCESS_WRITE;
+        }
+        if ((mode & VFS_MODE_IXUSR) != 0u) {
+            allowed |= VFS_ACCESS_EXEC;
+        }
+        return allowed;
+    }
+
+    if (credentials->gid == inode->gid) {
+        if ((mode & VFS_MODE_IRGRP) != 0u) {
+            allowed |= VFS_ACCESS_READ;
+        }
+        if ((mode & VFS_MODE_IWGRP) != 0u) {
+            allowed |= VFS_ACCESS_WRITE;
+        }
+        if ((mode & VFS_MODE_IXGRP) != 0u) {
+            allowed |= VFS_ACCESS_EXEC;
+        }
+        return allowed;
+    }
+
+    if ((mode & VFS_MODE_IROTH) != 0u) {
+        allowed |= VFS_ACCESS_READ;
+    }
+    if ((mode & VFS_MODE_IWOTH) != 0u) {
+        allowed |= VFS_ACCESS_WRITE;
+    }
+    if ((mode & VFS_MODE_IXOTH) != 0u) {
+        allowed |= VFS_ACCESS_EXEC;
+    }
+    return allowed;
+}
+
+static int vfs_has_access(const vfs_inode_t *inode, const vfs_credentials_t *credentials, uint32_t access_mask) {
+    return (vfs_allowed_access(inode, credentials) & access_mask) == access_mask;
+}
+
+static vfs_pipe_t *vfs_pipe_from_file(vfs_file_t *file) {
+    if (file == 0 || file->inode == 0 || file->inode->kind != VFS_INODE_PIPE || file->inode->private_data == 0) {
+        return 0;
+    }
+
+    return (vfs_pipe_t *)file->inode->private_data;
+}
+
 static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t length) {
     char *bytes = (char *)buffer;
     uint32_t count = 0u;
@@ -145,7 +250,13 @@ static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t lengt
     }
 
     while (count < length) {
-        char ch = serial_read_char();
+        char ch;
+
+        if (!serial_can_read()) {
+            return count != 0u ? (int32_t)count : VFS_ERR_WOULD_BLOCK;
+        }
+
+        ch = serial_read_char();
 
         if (ch == '\r') {
             ch = '\n';
@@ -183,6 +294,65 @@ static int32_t console_inode_write(vfs_file_t *file, const char *buffer, uint32_
     return (int32_t)length;
 }
 
+static int32_t pipe_inode_read(vfs_file_t *file, void *buffer, uint32_t length) {
+    vfs_pipe_t *pipe = vfs_pipe_from_file(file);
+    uint8_t *bytes = (uint8_t *)buffer;
+    uint32_t copied = 0u;
+
+    if (pipe == 0 || buffer == 0) {
+        return -1;
+    }
+
+    if ((file->flags & VFS_O_RDONLY) == 0u) {
+        return -1;
+    }
+
+    while (copied < length && pipe->buffered != 0u) {
+        bytes[copied++] = pipe->buffer[pipe->read_index];
+        pipe->read_index = (pipe->read_index + 1u) % VFS_PIPE_BUFFER_SIZE;
+        pipe->buffered--;
+    }
+
+    if (copied != 0u) {
+        return (int32_t)copied;
+    }
+
+    if (pipe->writer_count == 0u) {
+        return 0;
+    }
+
+    return VFS_ERR_WOULD_BLOCK;
+}
+
+static int32_t pipe_inode_write(vfs_file_t *file, const char *buffer, uint32_t length) {
+    vfs_pipe_t *pipe = vfs_pipe_from_file(file);
+    uint32_t written = 0u;
+
+    if (pipe == 0 || buffer == 0) {
+        return -1;
+    }
+
+    if ((file->flags & VFS_O_WRONLY) == 0u) {
+        return -1;
+    }
+
+    if (pipe->reader_count == 0u) {
+        return -1;
+    }
+
+    while (written < length && pipe->buffered < VFS_PIPE_BUFFER_SIZE) {
+        pipe->buffer[pipe->write_index] = (uint8_t)buffer[written++];
+        pipe->write_index = (pipe->write_index + 1u) % VFS_PIPE_BUFFER_SIZE;
+        pipe->buffered++;
+    }
+
+    if (written != 0u) {
+        return (int32_t)written;
+    }
+
+    return VFS_ERR_WOULD_BLOCK;
+}
+
 static void fd_table_clear(vfs_file_t **fd_table, uint32_t fd_count) {
     uint32_t index;
 
@@ -207,6 +377,7 @@ static vfs_file_t *vfs_alloc_file(void) {
         file_table[index].flags = 0u;
         file_table[index].offset = 0u;
         file_table[index].ref_count = 1u;
+        file_table[index].private_data = 0;
         return &file_table[index];
     }
 
@@ -214,6 +385,8 @@ static vfs_file_t *vfs_alloc_file(void) {
 }
 
 static void vfs_release_file(vfs_file_t *file) {
+    vfs_inode_t *inode;
+
     if (file == 0 || file->ref_count == 0u) {
         return;
     }
@@ -223,13 +396,31 @@ static void vfs_release_file(vfs_file_t *file) {
         return;
     }
 
-    if (file->inode != 0 && file->inode->ref_count != 0u) {
-        file->inode->ref_count--;
+    inode = file->inode;
+    if (inode != 0 && inode->ref_count != 0u) {
+        inode->ref_count--;
+    }
+
+    if (inode != 0 && inode->kind == VFS_INODE_PIPE && inode->private_data != 0) {
+        vfs_pipe_t *pipe = (vfs_pipe_t *)inode->private_data;
+
+        if ((file->flags & VFS_O_RDONLY) != 0u && pipe->reader_count != 0u) {
+            pipe->reader_count--;
+        }
+
+        if ((file->flags & VFS_O_WRONLY) != 0u && pipe->writer_count != 0u) {
+            pipe->writer_count--;
+        }
+
+        if (inode->ref_count == 0u) {
+            kfree(pipe);
+        }
     }
 
     file->inode = 0;
     file->flags = 0u;
     file->offset = 0u;
+    file->private_data = 0;
 }
 
 static vfs_file_t *vfs_open_inode(vfs_inode_t *inode, uint32_t flags) {
@@ -242,6 +433,7 @@ static vfs_file_t *vfs_open_inode(vfs_inode_t *inode, uint32_t flags) {
     file->inode = inode;
     file->flags = flags;
     file->offset = 0u;
+    file->private_data = 0;
     inode->ref_count++;
     return file;
 }
@@ -254,9 +446,13 @@ static void vfs_fill_stat(const vfs_inode_t *inode, vfs_stat_t *stat) {
     stat->kind = inode->kind;
     stat->size = inode->size;
     stat->child_count = inode->child_count;
+    stat->mode = inode->mode;
+    stat->uid = inode->uid;
+    stat->gid = inode->gid;
+    stat->links = inode->links;
 }
 
-static const vfs_inode_t *vfs_resolve_path(const char *path) {
+static const vfs_inode_t *vfs_resolve_path(const char *path, const vfs_credentials_t *credentials) {
     const vfs_inode_t *current = root_inode;
     const char *cursor = path;
 
@@ -278,7 +474,7 @@ static const vfs_inode_t *vfs_resolve_path(const char *path) {
         uint32_t index;
         const vfs_inode_t *next = 0;
 
-        if (current->kind != VFS_INODE_DIR) {
+        if (current->kind != VFS_INODE_DIR || !vfs_has_access(current, credentials, VFS_ACCESS_EXEC)) {
             return 0;
         }
 
@@ -312,7 +508,7 @@ static const vfs_inode_t *vfs_resolve_path(const char *path) {
     return current;
 }
 
-static int32_t vfs_resolve_parent(const char *path, vfs_inode_t **out_parent, char *leaf_name) {
+static int32_t vfs_resolve_parent(const char *path, const vfs_credentials_t *credentials, vfs_inode_t **out_parent, char *leaf_name) {
     char parent_path[VFS_PATH_MAX];
     uint32_t parent_length = 0u;
     uint32_t path_length = string_length(path);
@@ -357,7 +553,7 @@ static int32_t vfs_resolve_parent(const char *path, vfs_inode_t **out_parent, ch
         parent_path[parent_length] = '\0';
     }
 
-    *out_parent = (vfs_inode_t *)(uintptr_t)vfs_resolve_path(parent_path);
+    *out_parent = (vfs_inode_t *)(uintptr_t)vfs_resolve_path(parent_path, credentials);
     return *out_parent != 0 && (*out_parent)->kind == VFS_INODE_DIR ? 0 : -1;
 }
 
@@ -518,20 +714,35 @@ void vfs_init(const multiboot_info_t *multiboot_info) {
     }
 
     console_inode.ref_count = 0u;
-    dev_directory = (vfs_inode_t *)(uintptr_t)vfs_resolve_path("/dev");
-    if (dev_directory == 0 || vfs_append_child(dev_directory, &console_inode) != 0) {
+    tty_inode.ref_count = 0u;
+    dev_directory = (vfs_inode_t *)(uintptr_t)vfs_resolve_path("/dev", 0);
+    if (dev_directory == 0 ||
+        vfs_append_child(dev_directory, &console_inode) != 0 ||
+        vfs_append_child(dev_directory, &tty_inode) != 0) {
         root_inode = 0;
-        console_write("vfs: console attach failed\n");
+        console_write("vfs: console/tty attach failed\n");
         return;
     }
 
     console_write("vfs: ready\n");
 }
 
-int32_t vfs_open_path(vfs_file_t **out_file, const char *path, uint32_t flags) {
-    vfs_inode_t *inode = (vfs_inode_t *)(uintptr_t)vfs_resolve_path(path);
+int32_t vfs_open_path(vfs_file_t **out_file, const char *path, uint32_t flags, const vfs_credentials_t *credentials) {
+    vfs_inode_t *inode = (vfs_inode_t *)(uintptr_t)vfs_resolve_path(path, credentials);
+    uint32_t required_access = 0u;
 
     if (out_file == 0 || inode == 0 || inode->kind == VFS_INODE_DIR) {
+        return -1;
+    }
+
+    if ((flags & VFS_O_RDONLY) != 0u) {
+        required_access |= VFS_ACCESS_READ;
+    }
+    if ((flags & VFS_O_WRONLY) != 0u) {
+        required_access |= VFS_ACCESS_WRITE;
+    }
+
+    if (required_access != 0u && !vfs_has_access(inode, credentials, required_access)) {
         return -1;
     }
 
@@ -543,20 +754,23 @@ int32_t vfs_open_path(vfs_file_t **out_file, const char *path, uint32_t flags) {
     return *out_file != 0 ? 0 : -1;
 }
 
-int32_t vfs_create_path(vfs_file_t **out_file, const char *path, uint32_t flags) {
+int32_t vfs_create_path(vfs_file_t **out_file, const char *path, uint32_t flags, uint32_t mode, const vfs_credentials_t *credentials) {
     vfs_inode_t *parent;
     vfs_inode_t *inode;
     char leaf_name[32];
 
-    if (out_file == 0 || path == 0 || vfs_resolve_path(path) != 0) {
+    if (out_file == 0 || path == 0 || vfs_resolve_path(path, credentials) != 0) {
         return -1;
     }
 
-    if (vfs_resolve_parent(path, &parent, leaf_name) != 0 || parent->inode_ops == 0 || parent->inode_ops->create_child == 0) {
+    if (vfs_resolve_parent(path, credentials, &parent, leaf_name) != 0 ||
+        !vfs_has_access(parent, credentials, VFS_ACCESS_WRITE | VFS_ACCESS_EXEC) ||
+        parent->inode_ops == 0 ||
+        parent->inode_ops->create_child == 0) {
         return -1;
     }
 
-    if (parent->inode_ops->create_child(parent, leaf_name, VFS_INODE_REG, &inode) != 0) {
+    if (parent->inode_ops->create_child(parent, leaf_name, VFS_INODE_REG, mode, credentials, &inode) != 0) {
         return -1;
     }
 
@@ -651,39 +865,68 @@ void vfs_retain_file(vfs_file_t *file) {
     }
 }
 
-int32_t vfs_mkdir_path(const char *path) {
+int32_t vfs_mkdir_path(const char *path, uint32_t mode, const vfs_credentials_t *credentials) {
     vfs_inode_t *parent;
     vfs_inode_t *inode;
     char leaf_name[VFS_NAME_MAX];
 
-    if (path == 0 || vfs_resolve_path(path) != 0) {
+    if (path == 0 || vfs_resolve_path(path, credentials) != 0) {
         return -1;
     }
 
-    if (vfs_resolve_parent(path, &parent, leaf_name) != 0 || parent->inode_ops == 0 || parent->inode_ops->create_child == 0) {
+    if (vfs_resolve_parent(path, credentials, &parent, leaf_name) != 0 ||
+        !vfs_has_access(parent, credentials, VFS_ACCESS_WRITE | VFS_ACCESS_EXEC) ||
+        parent->inode_ops == 0 ||
+        parent->inode_ops->create_child == 0) {
         return -1;
     }
 
-    return parent->inode_ops->create_child(parent, leaf_name, VFS_INODE_DIR, &inode);
+    return parent->inode_ops->create_child(parent, leaf_name, VFS_INODE_DIR, mode, credentials, &inode);
 }
 
-int32_t vfs_unlink_path(const char *path) {
+int32_t vfs_unlink_path(const char *path, const vfs_credentials_t *credentials) {
     vfs_inode_t *parent;
+    const vfs_inode_t *child;
     char leaf_name[VFS_NAME_MAX];
 
     if (path == 0 || path[0] != '/' || path[1] == '\0') {
         return -1;
     }
 
-    if (vfs_resolve_parent(path, &parent, leaf_name) != 0 || parent->inode_ops == 0 || parent->inode_ops->remove_child == 0) {
+    if (vfs_resolve_parent(path, credentials, &parent, leaf_name) != 0 ||
+        !vfs_has_access(parent, credentials, VFS_ACCESS_WRITE | VFS_ACCESS_EXEC) ||
+        parent->inode_ops == 0 ||
+        parent->inode_ops->remove_child == 0) {
+        return -1;
+    }
+
+    child = vfs_resolve_path(path, credentials);
+    if (child == 0) {
+        return -1;
+    }
+
+    if ((parent->mode & VFS_MODE_ISVTX) != 0u &&
+        !vfs_is_superuser(credentials) &&
+        credentials->uid != parent->uid &&
+        credentials->uid != child->uid) {
         return -1;
     }
 
     return parent->inode_ops->remove_child(parent, leaf_name);
 }
 
-int32_t vfs_stat_path(const char *path, vfs_stat_t *stat) {
-    const vfs_inode_t *inode = vfs_resolve_path(path);
+int32_t vfs_access_path(const char *path, const vfs_credentials_t *credentials, uint32_t access_mask) {
+    const vfs_inode_t *inode = vfs_resolve_path(path, credentials);
+
+    if (inode == 0) {
+        return -1;
+    }
+
+    return vfs_has_access(inode, credentials, access_mask) ? 0 : -1;
+}
+
+int32_t vfs_stat_path(const char *path, const vfs_credentials_t *credentials, vfs_stat_t *stat) {
+    const vfs_inode_t *inode = vfs_resolve_path(path, credentials);
 
     if (path == 0 || stat == 0 || inode == 0) {
         return -1;
@@ -693,11 +936,15 @@ int32_t vfs_stat_path(const char *path, vfs_stat_t *stat) {
     return 0;
 }
 
-int32_t vfs_readdir_path(const char *path, uint32_t index, vfs_dirent_info_t *entry) {
-    const vfs_inode_t *directory = vfs_resolve_path(path);
+int32_t vfs_readdir_path(const char *path, const vfs_credentials_t *credentials, uint32_t index, vfs_dirent_info_t *entry) {
+    const vfs_inode_t *directory = vfs_resolve_path(path, credentials);
     const vfs_dir_entry_t *child;
 
-    if (path == 0 || entry == 0 || directory == 0 || directory->kind != VFS_INODE_DIR) {
+    if (path == 0 ||
+        entry == 0 ||
+        directory == 0 ||
+        directory->kind != VFS_INODE_DIR ||
+        !vfs_has_access(directory, credentials, VFS_ACCESS_READ)) {
         return -1;
     }
 
@@ -708,12 +955,16 @@ int32_t vfs_readdir_path(const char *path, uint32_t index, vfs_dirent_info_t *en
     child = &directory->children[index];
     entry->kind = child->inode != 0 ? child->inode->kind : VFS_INODE_NONE;
     entry->size = child->inode != 0 ? child->inode->size : 0u;
+    entry->mode = child->inode != 0 ? child->inode->mode : 0u;
+    entry->uid = child->inode != 0 ? child->inode->uid : 0u;
+    entry->gid = child->inode != 0 ? child->inode->gid : 0u;
+    entry->links = child->inode != 0 ? child->inode->links : 0u;
     zero_bytes(entry->name, sizeof(entry->name));
     string_copy(entry->name, child->name, sizeof(entry->name));
     return 0;
 }
 
-int32_t vfs_attach_stdio(vfs_file_t **fd_table, uint32_t fd_count) {
+int32_t vfs_attach_stdio(vfs_file_t **fd_table, uint32_t fd_count, const vfs_credentials_t *credentials) {
     vfs_file_t *stdin_file;
     vfs_file_t *stdout_file;
     vfs_file_t *stderr_file;
@@ -724,16 +975,16 @@ int32_t vfs_attach_stdio(vfs_file_t **fd_table, uint32_t fd_count) {
 
     fd_table_clear(fd_table, fd_count);
 
-    if (vfs_open_path(&stdin_file, "/dev/console", VFS_O_RDONLY) != 0) {
+    if (vfs_open_path(&stdin_file, "/dev/console", VFS_O_RDONLY, credentials) != 0) {
         return -1;
     }
 
-    if (vfs_open_path(&stdout_file, "/dev/console", VFS_O_WRONLY) != 0) {
+    if (vfs_open_path(&stdout_file, "/dev/console", VFS_O_WRONLY, credentials) != 0) {
         vfs_close_file(stdin_file);
         return -1;
     }
 
-    if (vfs_open_path(&stderr_file, "/dev/console", VFS_O_WRONLY) != 0) {
+    if (vfs_open_path(&stderr_file, "/dev/console", VFS_O_WRONLY, credentials) != 0) {
         vfs_close_file(stdin_file);
         vfs_close_file(stdout_file);
         return -1;
@@ -813,6 +1064,67 @@ int32_t vfs_write_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, cons
     }
 
     return file->inode->ops->write(file, buffer, length);
+}
+
+int32_t vfs_create_pipe(vfs_file_t **out_read_file, vfs_file_t **out_write_file) {
+    vfs_pipe_t *pipe;
+    vfs_file_t *read_file;
+    vfs_file_t *write_file;
+
+    if (out_read_file == 0 || out_write_file == 0) {
+        return -1;
+    }
+
+    pipe = (vfs_pipe_t *)kzalloc(sizeof(*pipe));
+    if (pipe == 0) {
+        return -1;
+    }
+
+    pipe->inode.name = "pipe";
+    pipe->inode.kind = VFS_INODE_PIPE;
+    pipe->inode.ops = &pipe_ops;
+    pipe->inode.inode_ops = 0;
+    pipe->inode.ref_count = 0u;
+    pipe->inode.data = 0;
+    pipe->inode.size = 0u;
+    pipe->inode.children = 0;
+    pipe->inode.child_count = 0u;
+    pipe->inode.child_capacity = 0u;
+    pipe->inode.mode = VFS_MODE_IRUSR | VFS_MODE_IWUSR;
+    pipe->inode.uid = 0u;
+    pipe->inode.gid = 0u;
+    pipe->inode.links = 0u;
+    pipe->inode.private_data = pipe;
+
+    read_file = vfs_open_inode(&pipe->inode, VFS_O_RDONLY);
+    if (read_file == 0) {
+        kfree(pipe);
+        return -1;
+    }
+
+    write_file = vfs_open_inode(&pipe->inode, VFS_O_WRONLY);
+    if (write_file == 0) {
+        vfs_close_file(read_file);
+        return -1;
+    }
+
+    pipe->reader_count = 1u;
+    pipe->writer_count = 1u;
+    *out_read_file = read_file;
+    *out_write_file = write_file;
+    return 0;
+}
+
+int vfs_file_is_pipe(const vfs_file_t *file) {
+    return file != 0 && file->inode != 0 && file->inode->kind == VFS_INODE_PIPE;
+}
+
+int32_t vfs_pipe_read(vfs_file_t *file, void *buffer, uint32_t length) {
+    return pipe_inode_read(file, buffer, length);
+}
+
+int32_t vfs_pipe_write(vfs_file_t *file, const char *buffer, uint32_t length) {
+    return pipe_inode_write(file, buffer, length);
 }
 
 uint32_t vfs_root_writable(void) {
@@ -895,8 +1207,8 @@ int32_t vfs_storage_selftest(void) {
         return 0;
     }
 
-    if (vfs_open_path(&file, "/var/bootcount", VFS_O_RDWR) != 0) {
-        if (vfs_create_path(&file, "/var/bootcount", VFS_O_RDWR) != 0) {
+    if (vfs_open_path(&file, "/var/bootcount", VFS_O_RDWR, 0) != 0) {
+        if (vfs_create_path(&file, "/var/bootcount", VFS_O_RDWR, VFS_MODE_FILE_DEFAULT, 0) != 0) {
             console_write("storage: failed to create /var/bootcount\n");
             return -1;
         }

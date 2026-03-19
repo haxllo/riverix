@@ -148,6 +148,55 @@ uint32_t ticks(void) {
     return result;
 }
 
+uint32_t getuid(void) {
+    uint32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_GETUID) : "memory");
+    return result;
+}
+
+uint32_t getgid(void) {
+    uint32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_GETGID) : "memory");
+    return result;
+}
+
+int32_t setuid(uint32_t uid) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_SETUID), "b"(uid) : "memory");
+    return result;
+}
+
+int32_t setgid(uint32_t gid) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_SETGID), "b"(gid) : "memory");
+    return result;
+}
+
+int32_t setsid(void) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_SETSID) : "memory");
+    return result;
+}
+
+int32_t gettty(char *buffer, uint32_t length) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_GETTTY), "b"(buffer), "c"(length) : "memory");
+    return result;
+}
+
+int32_t pipe(int32_t fds[2]) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_PIPE), "b"(fds) : "memory");
+    return result;
+}
+
 int32_t readdir(const char *path, uint32_t index, dirent_t *entry) {
     int32_t result;
 

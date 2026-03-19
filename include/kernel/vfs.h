@@ -5,10 +5,12 @@
 
 #include "kernel/multiboot.h"
 
-#define VFS_MAX_FDS 8u
-#define VFS_MAX_FILES 16u
+#define VFS_MAX_FDS 16u
+#define VFS_MAX_FILES 32u
 #define VFS_PATH_MAX 128u
 #define VFS_NAME_MAX 32u
+#define VFS_PIPE_BUFFER_SIZE 1024u
+#define VFS_ERR_WOULD_BLOCK (-2)
 
 typedef struct vfs_inode vfs_inode_t;
 typedef struct vfs_file vfs_file_t;
@@ -16,6 +18,7 @@ typedef struct vfs_dir_entry vfs_dir_entry_t;
 typedef struct vfs_inode_ops vfs_inode_ops_t;
 typedef struct vfs_stat vfs_stat_t;
 typedef struct vfs_dirent_info vfs_dirent_info_t;
+typedef struct vfs_credentials vfs_credentials_t;
 
 typedef int32_t (*vfs_read_op_t)(vfs_file_t *file, void *buffer, uint32_t length);
 typedef int32_t (*vfs_write_op_t)(vfs_file_t *file, const char *buffer, uint32_t length);
@@ -25,7 +28,31 @@ typedef enum vfs_inode_kind {
     VFS_INODE_DEV,
     VFS_INODE_REG,
     VFS_INODE_DIR,
+    VFS_INODE_PIPE,
 } vfs_inode_kind_t;
+
+enum {
+    VFS_ACCESS_EXEC = 1u << 0,
+    VFS_ACCESS_WRITE = 1u << 1,
+    VFS_ACCESS_READ = 1u << 2,
+};
+
+enum {
+    VFS_MODE_IXOTH = 0x001u,
+    VFS_MODE_IWOTH = 0x002u,
+    VFS_MODE_IROTH = 0x004u,
+    VFS_MODE_IXGRP = 0x008u,
+    VFS_MODE_IWGRP = 0x010u,
+    VFS_MODE_IRGRP = 0x020u,
+    VFS_MODE_IXUSR = 0x040u,
+    VFS_MODE_IWUSR = 0x080u,
+    VFS_MODE_IRUSR = 0x100u,
+    VFS_MODE_ISVTX = 0x200u,
+    VFS_MODE_FILE_DEFAULT = 0644u,
+    VFS_MODE_EXEC_DEFAULT = 0755u,
+    VFS_MODE_DIR_DEFAULT = 0755u,
+    VFS_MODE_TMP_DEFAULT = 01777u,
+};
 
 typedef enum vfs_open_flags {
     VFS_O_RDONLY = 1u << 0,
@@ -41,7 +68,12 @@ typedef enum vfs_seek_whence {
     VFS_SEEK_END = 2u,
 } vfs_seek_whence_t;
 
-typedef int32_t (*vfs_create_child_op_t)(vfs_inode_t *directory, const char *name, vfs_inode_kind_t kind, vfs_inode_t **out_inode);
+typedef int32_t (*vfs_create_child_op_t)(vfs_inode_t *directory,
+                                         const char *name,
+                                         vfs_inode_kind_t kind,
+                                         uint32_t mode,
+                                         const vfs_credentials_t *credentials,
+                                         vfs_inode_t **out_inode);
 typedef int32_t (*vfs_remove_child_op_t)(vfs_inode_t *directory, const char *name);
 typedef int32_t (*vfs_resize_op_t)(vfs_inode_t *inode, uint32_t size);
 
@@ -60,12 +92,25 @@ struct vfs_stat {
     uint32_t kind;
     uint32_t size;
     uint32_t child_count;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t links;
 };
 
 struct vfs_dirent_info {
     uint32_t kind;
     uint32_t size;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t links;
     char name[VFS_NAME_MAX];
+};
+
+struct vfs_credentials {
+    uint32_t uid;
+    uint32_t gid;
 };
 
 struct vfs_dir_entry {
@@ -84,6 +129,10 @@ struct vfs_inode {
     vfs_dir_entry_t *children;
     uint32_t child_count;
     uint32_t child_capacity;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t links;
     void *private_data;
 };
 
@@ -92,11 +141,12 @@ struct vfs_file {
     uint32_t flags;
     uint32_t offset;
     uint32_t ref_count;
+    void *private_data;
 };
 
 void vfs_init(const multiboot_info_t *multiboot_info);
-int32_t vfs_open_path(vfs_file_t **out_file, const char *path, uint32_t flags);
-int32_t vfs_create_path(vfs_file_t **out_file, const char *path, uint32_t flags);
+int32_t vfs_open_path(vfs_file_t **out_file, const char *path, uint32_t flags, const vfs_credentials_t *credentials);
+int32_t vfs_create_path(vfs_file_t **out_file, const char *path, uint32_t flags, uint32_t mode, const vfs_credentials_t *credentials);
 void vfs_close_file(vfs_file_t *file);
 int32_t vfs_read_file(vfs_file_t *file, void *buffer, uint32_t length);
 int32_t vfs_write_file(vfs_file_t *file, const char *buffer, uint32_t length);
@@ -104,15 +154,20 @@ int32_t vfs_seek_file(vfs_file_t *file, int32_t offset, uint32_t whence);
 int32_t vfs_truncate_file(vfs_file_t *file, uint32_t length);
 void vfs_rewind_file(vfs_file_t *file);
 void vfs_retain_file(vfs_file_t *file);
-int32_t vfs_mkdir_path(const char *path);
-int32_t vfs_unlink_path(const char *path);
-int32_t vfs_stat_path(const char *path, vfs_stat_t *stat);
-int32_t vfs_readdir_path(const char *path, uint32_t index, vfs_dirent_info_t *entry);
-int32_t vfs_attach_stdio(vfs_file_t **fd_table, uint32_t fd_count);
+int32_t vfs_mkdir_path(const char *path, uint32_t mode, const vfs_credentials_t *credentials);
+int32_t vfs_unlink_path(const char *path, const vfs_credentials_t *credentials);
+int32_t vfs_access_path(const char *path, const vfs_credentials_t *credentials, uint32_t access_mask);
+int32_t vfs_stat_path(const char *path, const vfs_credentials_t *credentials, vfs_stat_t *stat);
+int32_t vfs_readdir_path(const char *path, const vfs_credentials_t *credentials, uint32_t index, vfs_dirent_info_t *entry);
+int32_t vfs_attach_stdio(vfs_file_t **fd_table, uint32_t fd_count, const vfs_credentials_t *credentials);
 int32_t vfs_clone_fds(vfs_file_t **destination, vfs_file_t **source, uint32_t fd_count);
 void vfs_detach_fds(vfs_file_t **fd_table, uint32_t fd_count);
 int32_t vfs_read_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, void *buffer, uint32_t length);
 int32_t vfs_write_fd(vfs_file_t **fd_table, uint32_t fd_count, uint32_t fd, const char *buffer, uint32_t length);
+int32_t vfs_create_pipe(vfs_file_t **out_read_file, vfs_file_t **out_write_file);
+int vfs_file_is_pipe(const vfs_file_t *file);
+int32_t vfs_pipe_read(vfs_file_t *file, void *buffer, uint32_t length);
+int32_t vfs_pipe_write(vfs_file_t *file, const char *buffer, uint32_t length);
 uint32_t vfs_root_writable(void);
 int32_t vfs_storage_selftest(void);
 int32_t vfs_reinstall_rootfs(void);

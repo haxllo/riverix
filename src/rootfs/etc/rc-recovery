@@ -13,4 +13,10 @@ echo phase6: bin end
 echo phase6: ps begin
 ps
 echo phase6: ps end
+echo phase8: pipe begin
+echo phase8-recovery | cat
+echo phase8: pipe end
+tty
+id
+phase8
 echo phase6: recovery done

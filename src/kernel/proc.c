@@ -14,9 +14,11 @@
 
 #define MAX_TASKS 8u
 #define TASK_EFLAGS 0x00000202u
+#define PROC_IO_CHUNK 256u
 #define PROC_PATH_MAX VFS_PATH_MAX
 #define PROC_PATH_COMPONENT_MAX VFS_NAME_MAX
 #define PROC_PATH_COMPONENTS_MAX 24u
+#define PROC_DEFAULT_TTY "/dev/console"
 
 typedef enum task_state {
     TASK_UNUSED = 0,
@@ -31,6 +33,13 @@ typedef enum task_kind {
     TASK_KERNEL = 0,
     TASK_USER,
 } task_kind_t;
+
+typedef enum task_block_reason {
+    TASK_BLOCK_NONE = 0,
+    TASK_BLOCK_WAITPID,
+    TASK_BLOCK_IO_READ,
+    TASK_BLOCK_IO_WRITE,
+} task_block_reason_t;
 
 typedef struct task {
     uint32_t pid;
@@ -52,6 +61,16 @@ typedef struct task {
     uint32_t wake_tick;
     uint32_t reap_ready;
     char cwd[PROC_PATH_MAX];
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t session_id;
+    uint32_t process_group_id;
+    char tty_name[SYS_NAME_MAX];
+    task_block_reason_t block_reason;
+    uint32_t blocked_fd;
+    uint32_t blocked_user_buffer;
+    uint32_t blocked_length;
+    uint32_t blocked_done;
     vfs_file_t *fd_table[VFS_MAX_FDS];
 } task_t;
 
@@ -75,6 +94,33 @@ static void task_reset_image(exec_image_t *image) {
         image->mapped_virtuals[index] = 0u;
         image->mapped_pages[index] = 0u;
     }
+}
+
+static void proc_fill_credentials(const task_t *task, vfs_credentials_t *credentials) {
+    if (credentials == 0) {
+        return;
+    }
+
+    if (task == 0) {
+        credentials->uid = 0u;
+        credentials->gid = 0u;
+        return;
+    }
+
+    credentials->uid = task->uid;
+    credentials->gid = task->gid;
+}
+
+static void task_clear_blocked_io(task_t *task) {
+    if (task == 0) {
+        return;
+    }
+
+    task->block_reason = TASK_BLOCK_NONE;
+    task->blocked_fd = 0u;
+    task->blocked_user_buffer = 0u;
+    task->blocked_length = 0u;
+    task->blocked_done = 0u;
 }
 
 static void copy_bytes(void *destination, const void *source, uint32_t length) {
@@ -112,6 +158,12 @@ static void task_reset(task_t *task) {
     task->reap_ready = 0u;
     task->cwd[0] = '/';
     task->cwd[1] = '\0';
+    task->uid = 0u;
+    task->gid = 0u;
+    task->session_id = 0u;
+    task->process_group_id = 0u;
+    task->tty_name[0] = '\0';
+    task_clear_blocked_io(task);
 
     for (index = 0u; index < VFS_MAX_FDS; index++) {
         task->fd_table[index] = 0;
@@ -192,7 +244,10 @@ static int task_setup_kernel_stack(task_t *task) {
 }
 
 static int task_setup_stdio(task_t *task) {
-    return vfs_attach_stdio(task->fd_table, VFS_MAX_FDS);
+    vfs_credentials_t credentials;
+
+    proc_fill_credentials(task, &credentials);
+    return vfs_attach_stdio(task->fd_table, VFS_MAX_FDS, &credentials);
 }
 
 static void task_prepare_kernel_frame(interrupt_frame_t *frame) {
@@ -247,6 +302,24 @@ static uint32_t string_length(const char *text) {
     return length;
 }
 
+static int strings_equal(const char *left, const char *right) {
+    uint32_t index = 0u;
+
+    if (left == 0 || right == 0) {
+        return 0;
+    }
+
+    while (left[index] != '\0' && right[index] != '\0') {
+        if (left[index] != right[index]) {
+            return 0;
+        }
+
+        index++;
+    }
+
+    return left[index] == right[index];
+}
+
 static void string_copy(char *destination, const char *source, uint32_t max_length) {
     uint32_t index = 0u;
 
@@ -289,6 +362,14 @@ static void task_set_name(task_t *task, const char *name) {
     string_copy(task->name, name != 0 ? name : "", sizeof(task->name));
 }
 
+static void task_set_tty(task_t *task, const char *tty_name) {
+    if (task == 0) {
+        return;
+    }
+
+    string_copy(task->tty_name, tty_name != 0 ? tty_name : "", sizeof(task->tty_name));
+}
+
 static void write_hex32_to_fd(uint32_t fd, uint32_t value) {
     static const char hex_digits[] = "0123456789ABCDEF";
     char buffer[8];
@@ -302,6 +383,23 @@ static void write_hex32_to_fd(uint32_t fd, uint32_t value) {
     (void)sys_write(fd, buffer, 8u);
 }
 
+static const char *proc_effective_path(const task_t *task, const char *path, char *resolved_path, uint32_t resolved_length) {
+    if (task != 0 &&
+        path != 0 &&
+        resolved_path != 0 &&
+        resolved_length != 0u &&
+        strings_equal(path, "/dev/tty")) {
+        if (task->tty_name[0] == '\0') {
+            return 0;
+        }
+
+        string_copy(resolved_path, task->tty_name, resolved_length);
+        return resolved_path;
+    }
+
+    return path;
+}
+
 static int proc_allocate_fd_slot(task_t *task) {
     uint32_t index;
 
@@ -310,6 +408,26 @@ static int proc_allocate_fd_slot(task_t *task) {
     }
 
     for (index = 0u; index < VFS_MAX_FDS; index++) {
+        if (task->fd_table[index] == 0) {
+            return (int)index;
+        }
+    }
+
+    return -1;
+}
+
+static int proc_allocate_fd_slot_excluding(task_t *task, int32_t excluded_fd) {
+    uint32_t index;
+
+    if (task == 0) {
+        return -1;
+    }
+
+    for (index = 0u; index < VFS_MAX_FDS; index++) {
+        if ((int32_t)index == excluded_fd) {
+            continue;
+        }
+
         if (task->fd_table[index] == 0) {
             return (int)index;
         }
@@ -552,6 +670,11 @@ static task_t *proc_create_user_task(const char *path) {
     task->kind = TASK_USER;
     task->saved_esp = (uint32_t)(uintptr_t)frame;
     task->pid = next_pid++;
+    task->uid = 0u;
+    task->gid = 0u;
+    task->session_id = task->pid;
+    task->process_group_id = task->pid;
+    task_set_tty(task, PROC_DEFAULT_TTY);
     task->state = TASK_RUNNABLE;
 
     console_write("task: ");
@@ -710,6 +833,7 @@ static void proc_finish_blocked_wait(task_t *parent, task_t *child) {
 
     parent->wait_target_pid = -1;
     parent->wait_status_user = 0u;
+    parent->block_reason = TASK_BLOCK_NONE;
     if (parent->state == TASK_BLOCKED) {
         parent->state = TASK_RUNNABLE;
     }
@@ -732,7 +856,9 @@ static void proc_notify_parent_exit(task_t *child) {
         return;
     }
 
-    if (parent->state != TASK_BLOCKED || !proc_wait_matches(parent, child, parent->wait_target_pid)) {
+    if (parent->state != TASK_BLOCKED ||
+        parent->block_reason != TASK_BLOCK_WAITPID ||
+        !proc_wait_matches(parent, child, parent->wait_target_pid)) {
         return;
     }
 
@@ -749,6 +875,148 @@ static int proc_collect_zombie_now(task_t *parent, task_t *child, uint32_t statu
     frame->eax = child->pid;
     task_release_resources(child);
     return 0;
+}
+
+static void proc_complete_blocked_io(task_t *task, int32_t result) {
+    interrupt_frame_t *frame;
+
+    if (task == 0 || task->saved_esp == 0u) {
+        return;
+    }
+
+    frame = (interrupt_frame_t *)(uintptr_t)task->saved_esp;
+    frame->eax = (uint32_t)result;
+    task_clear_blocked_io(task);
+    if (task->state == TASK_BLOCKED) {
+        task->state = TASK_RUNNABLE;
+    }
+}
+
+static void proc_retry_blocked_read(task_t *task) {
+    char staging[PROC_IO_CHUNK];
+    vfs_file_t *file;
+
+    if (task == 0 || task->block_reason != TASK_BLOCK_IO_READ) {
+        return;
+    }
+
+    file = proc_lookup_fd(task, task->blocked_fd);
+    if (file == 0) {
+        proc_complete_blocked_io(task, task->blocked_done != 0u ? (int32_t)task->blocked_done : -1);
+        return;
+    }
+
+    while (task->blocked_done < task->blocked_length) {
+        uint32_t chunk = task->blocked_length - task->blocked_done;
+        int32_t read_result;
+
+        if (chunk > sizeof(staging)) {
+            chunk = sizeof(staging);
+        }
+
+        read_result = vfs_read_file(file, staging, chunk);
+        if (read_result == VFS_ERR_WOULD_BLOCK) {
+            if (task->blocked_done != 0u) {
+                proc_complete_blocked_io(task, (int32_t)task->blocked_done);
+            }
+            return;
+        }
+
+        if (read_result < 0) {
+            proc_complete_blocked_io(task, task->blocked_done != 0u ? (int32_t)task->blocked_done : -1);
+            return;
+        }
+
+        if (read_result == 0) {
+            proc_complete_blocked_io(task, (int32_t)task->blocked_done);
+            return;
+        }
+
+        if (user_copy_to_in(task->page_directory_phys,
+                            task->blocked_user_buffer + task->blocked_done,
+                            staging,
+                            (uint32_t)read_result) != 0) {
+            proc_complete_blocked_io(task, task->blocked_done != 0u ? (int32_t)task->blocked_done : -1);
+            return;
+        }
+
+        task->blocked_done += (uint32_t)read_result;
+        if ((uint32_t)read_result < chunk) {
+            break;
+        }
+    }
+
+    proc_complete_blocked_io(task, (int32_t)task->blocked_done);
+}
+
+static void proc_retry_blocked_write(task_t *task) {
+    char staging[PROC_IO_CHUNK];
+    vfs_file_t *file;
+
+    if (task == 0 || task->block_reason != TASK_BLOCK_IO_WRITE) {
+        return;
+    }
+
+    file = proc_lookup_fd(task, task->blocked_fd);
+    if (file == 0) {
+        proc_complete_blocked_io(task, task->blocked_done != 0u ? (int32_t)task->blocked_done : -1);
+        return;
+    }
+
+    while (task->blocked_done < task->blocked_length) {
+        uint32_t chunk = task->blocked_length - task->blocked_done;
+        int32_t write_result;
+
+        if (chunk > sizeof(staging)) {
+            chunk = sizeof(staging);
+        }
+
+        if (user_copy_from_in(task->page_directory_phys,
+                              staging,
+                              task->blocked_user_buffer + task->blocked_done,
+                              chunk) != 0) {
+            proc_complete_blocked_io(task, task->blocked_done != 0u ? (int32_t)task->blocked_done : -1);
+            return;
+        }
+
+        write_result = vfs_write_file(file, staging, chunk);
+        if (write_result == VFS_ERR_WOULD_BLOCK) {
+            if (task->blocked_done != 0u) {
+                proc_complete_blocked_io(task, (int32_t)task->blocked_done);
+            }
+            return;
+        }
+
+        if (write_result < 0) {
+            proc_complete_blocked_io(task, task->blocked_done != 0u ? (int32_t)task->blocked_done : -1);
+            return;
+        }
+
+        task->blocked_done += (uint32_t)write_result;
+        if ((uint32_t)write_result < chunk) {
+            break;
+        }
+    }
+
+    proc_complete_blocked_io(task, (int32_t)task->blocked_done);
+}
+
+static void proc_service_blocked_io(void) {
+    uint32_t index;
+
+    for (index = 0u; index < MAX_TASKS; index++) {
+        task_t *task = &tasks[index];
+
+        if (task->state != TASK_BLOCKED) {
+            continue;
+        }
+
+        if (task->block_reason == TASK_BLOCK_IO_READ) {
+            proc_retry_blocked_read(task);
+        } else if (task->block_reason == TASK_BLOCK_IO_WRITE) {
+            proc_retry_blocked_write(task);
+        }
+    }
 }
 
 static void idle_entry(void *arg) {
@@ -853,6 +1121,7 @@ uint32_t proc_schedule(interrupt_frame_t *frame) {
     }
 
     proc_wake_sleepers();
+    proc_service_blocked_io();
     proc_collect_reapable_zombies();
 
     next_task = proc_pick_next();
@@ -896,7 +1165,10 @@ int proc_preemptible_from_interrupt(const interrupt_frame_t *frame) {
 
 int32_t proc_open_fd(const char *path, uint32_t flags) {
     char absolute_path[PROC_PATH_MAX];
+    char resolved_path[PROC_PATH_MAX];
     vfs_file_t *file = 0;
+    const char *effective_path;
+    vfs_credentials_t credentials;
     int32_t fd;
 
     if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
@@ -912,8 +1184,15 @@ int32_t proc_open_fd(const char *path, uint32_t flags) {
         return -1;
     }
 
-    if (vfs_open_path(&file, absolute_path, flags & ~VFS_O_CREATE) != 0) {
-        if ((flags & VFS_O_CREATE) == 0u || vfs_create_path(&file, absolute_path, flags & ~VFS_O_CREATE) != 0) {
+    proc_fill_credentials(current_task, &credentials);
+    effective_path = proc_effective_path(current_task, absolute_path, resolved_path, sizeof(resolved_path));
+    if (effective_path == 0) {
+        return -1;
+    }
+
+    if (vfs_open_path(&file, effective_path, flags & ~VFS_O_CREATE, &credentials) != 0) {
+        if ((flags & VFS_O_CREATE) == 0u ||
+            vfs_create_path(&file, effective_path, flags & ~VFS_O_CREATE, VFS_MODE_FILE_DEFAULT, &credentials) != 0) {
             return -1;
         }
     }
@@ -978,50 +1257,69 @@ int32_t proc_seek_fd(uint32_t fd, int32_t offset, uint32_t whence) {
 
 int32_t proc_mkdir(const char *path) {
     char absolute_path[PROC_PATH_MAX];
+    vfs_credentials_t credentials;
 
     if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
         return -1;
     }
 
-    return vfs_mkdir_path(absolute_path);
+    proc_fill_credentials(current_task, &credentials);
+    return vfs_mkdir_path(absolute_path, VFS_MODE_DIR_DEFAULT, &credentials);
 }
 
 int32_t proc_unlink(const char *path) {
     char absolute_path[PROC_PATH_MAX];
+    vfs_credentials_t credentials;
 
     if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
         return -1;
     }
 
-    return vfs_unlink_path(absolute_path);
+    proc_fill_credentials(current_task, &credentials);
+    return vfs_unlink_path(absolute_path, &credentials);
 }
 
 int32_t proc_stat(const char *path, vfs_stat_t *stat) {
     char absolute_path[PROC_PATH_MAX];
+    char resolved_path[PROC_PATH_MAX];
+    const char *effective_path;
+    vfs_credentials_t credentials;
 
     if (current_task == 0 || path == 0 || stat == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
         return -1;
     }
 
-    return vfs_stat_path(absolute_path, stat);
+    proc_fill_credentials(current_task, &credentials);
+    effective_path = proc_effective_path(current_task, absolute_path, resolved_path, sizeof(resolved_path));
+    if (effective_path == 0) {
+        return -1;
+    }
+
+    return vfs_stat_path(effective_path, &credentials, stat);
 }
 
 int32_t proc_readdir(const char *path, uint32_t index, sys_dirent_t *entry) {
     char absolute_path[PROC_PATH_MAX];
     vfs_dirent_info_t kernel_entry;
+    vfs_credentials_t credentials;
     int32_t result;
 
     if (current_task == 0 || path == 0 || entry == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
         return -1;
     }
 
-    result = vfs_readdir_path(absolute_path, index, &kernel_entry);
+    proc_fill_credentials(current_task, &credentials);
+    result = vfs_readdir_path(absolute_path, &credentials, index, &kernel_entry);
     if (result != 0) {
         return result;
     }
 
     entry->kind = kernel_entry.kind;
     entry->size = kernel_entry.size;
+    entry->mode = kernel_entry.mode;
+    entry->uid = kernel_entry.uid;
+    entry->gid = kernel_entry.gid;
+    entry->links = kernel_entry.links;
     string_copy(entry->name, kernel_entry.name, sizeof(entry->name));
     return 0;
 }
@@ -1048,10 +1346,15 @@ int32_t proc_procinfo(uint32_t index, sys_procinfo_t *info) {
 
         info->pid = task->pid;
         info->parent_pid = task->parent_pid;
+        info->sid = task->session_id;
+        info->pgid = task->process_group_id;
         info->state = (uint32_t)task->state;
         info->kind = (uint32_t)task->kind;
         info->run_ticks = task->run_ticks;
+        info->uid = task->uid;
+        info->gid = task->gid;
         string_copy(info->name, task->name, sizeof(info->name));
+        string_copy(info->tty, task->tty_name, sizeof(info->tty));
         return 0;
     }
 
@@ -1076,13 +1379,17 @@ int32_t proc_getcwd(char *buffer, uint32_t length) {
 
 int32_t proc_chdir(const char *path) {
     char absolute_path[PROC_PATH_MAX];
+    vfs_credentials_t credentials;
     vfs_stat_t stat;
 
     if (current_task == 0 || path == 0 || proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0) {
         return -1;
     }
 
-    if (vfs_stat_path(absolute_path, &stat) != 0 || stat.kind != VFS_INODE_DIR) {
+    proc_fill_credentials(current_task, &credentials);
+    if (vfs_stat_path(absolute_path, &credentials, &stat) != 0 ||
+        stat.kind != VFS_INODE_DIR ||
+        vfs_access_path(absolute_path, &credentials, VFS_ACCESS_EXEC) != 0) {
         return -1;
     }
 
@@ -1126,6 +1433,100 @@ int32_t proc_dup2(uint32_t oldfd, uint32_t newfd) {
     vfs_retain_file(file);
     current_task->fd_table[newfd] = file;
     return (int32_t)newfd;
+}
+
+uint32_t proc_getuid(void) {
+    return current_task != 0 ? current_task->uid : 0u;
+}
+
+uint32_t proc_getgid(void) {
+    return current_task != 0 ? current_task->gid : 0u;
+}
+
+int32_t proc_setuid(uint32_t uid) {
+    if (current_task == 0 || current_task->uid != 0u) {
+        return -1;
+    }
+
+    current_task->uid = uid;
+    return 0;
+}
+
+int32_t proc_setgid(uint32_t gid) {
+    if (current_task == 0 || current_task->uid != 0u) {
+        return -1;
+    }
+
+    current_task->gid = gid;
+    return 0;
+}
+
+int32_t proc_setsid(void) {
+    if (current_task == 0) {
+        return -1;
+    }
+
+    current_task->session_id = current_task->pid;
+    current_task->process_group_id = current_task->pid;
+    current_task->tty_name[0] = '\0';
+    return (int32_t)current_task->session_id;
+}
+
+int32_t proc_gettty(char *buffer, uint32_t length) {
+    uint32_t tty_length;
+
+    if (current_task == 0 || buffer == 0 || length == 0u || current_task->tty_name[0] == '\0') {
+        return -1;
+    }
+
+    tty_length = string_length(current_task->tty_name);
+    if ((tty_length + 1u) > length) {
+        return -1;
+    }
+
+    string_copy(buffer, current_task->tty_name, length);
+    return (int32_t)tty_length;
+}
+
+int32_t proc_pipe(int32_t *fds) {
+    vfs_file_t *read_file = 0;
+    vfs_file_t *write_file = 0;
+    int32_t read_fd;
+    int32_t write_fd;
+
+    if (current_task == 0 || fds == 0) {
+        return -1;
+    }
+
+    read_fd = proc_allocate_fd_slot(current_task);
+    if (read_fd < 0) {
+        return -1;
+    }
+
+    write_fd = proc_allocate_fd_slot_excluding(current_task, read_fd);
+    if (write_fd < 0) {
+        return -1;
+    }
+
+    if (vfs_create_pipe(&read_file, &write_file) != 0 ||
+        proc_install_fd(current_task, read_fd, read_file) < 0 ||
+        proc_install_fd(current_task, write_fd, write_file) < 0) {
+        if (read_file != 0) {
+            vfs_close_file(read_file);
+        }
+        if (write_file != 0) {
+            vfs_close_file(write_file);
+        }
+        current_task->fd_table[(uint32_t)read_fd] = 0;
+        if ((uint32_t)write_fd < VFS_MAX_FDS) {
+            current_task->fd_table[(uint32_t)write_fd] = 0;
+        }
+        return -1;
+    }
+
+    fds[0] = read_fd;
+    fds[1] = write_fd;
+    return 0;
 }
 
 static int proc_copy_exec_args(const char *default_argv0,
@@ -1194,6 +1595,7 @@ uint32_t proc_sys_exit(interrupt_frame_t *frame, int32_t status) {
     current_task->exit_status = status;
     current_task->wait_target_pid = -1;
     current_task->wait_status_user = 0u;
+    task_clear_blocked_io(current_task);
     current_task->state = TASK_ZOMBIE;
     current_task->reap_ready = current_task->parent_pid == 0u ? 1u : 0u;
 
@@ -1229,8 +1631,180 @@ uint32_t proc_sys_waitpid(interrupt_frame_t *frame, int32_t pid, uint32_t status
 
     current_task->wait_target_pid = pid;
     current_task->wait_status_user = status_user;
+    current_task->block_reason = TASK_BLOCK_WAITPID;
     current_task->state = TASK_BLOCKED;
     return proc_schedule(frame);
+}
+
+uint32_t proc_sys_read(interrupt_frame_t *frame, uint32_t fd, uint32_t buffer_user, uint32_t length) {
+    char staging[PROC_IO_CHUNK];
+    vfs_file_t *file;
+    uint32_t done = 0u;
+
+    if (current_task == 0 || buffer_user == 0u) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    if (length == 0u) {
+        frame->eax = 0u;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    file = proc_lookup_fd(current_task, fd);
+    if (file == 0) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    while (done < length) {
+        uint32_t chunk = length - done;
+        int32_t read_result;
+
+        if (chunk > sizeof(staging)) {
+            chunk = sizeof(staging);
+        }
+
+        read_result = vfs_read_file(file, staging, chunk);
+        if (read_result == VFS_ERR_WOULD_BLOCK) {
+            if (done != 0u || !interrupt_from_user(frame)) {
+                frame->eax = done != 0u ? done : (uint32_t)-1;
+                return (uint32_t)(uintptr_t)frame;
+            }
+
+            current_task->block_reason = TASK_BLOCK_IO_READ;
+            current_task->blocked_fd = fd;
+            current_task->blocked_user_buffer = buffer_user;
+            current_task->blocked_length = length;
+            current_task->blocked_done = 0u;
+            current_task->state = TASK_BLOCKED;
+            return proc_schedule(frame);
+        }
+
+        if (read_result < 0) {
+            frame->eax = done != 0u ? done : (uint32_t)-1;
+            return (uint32_t)(uintptr_t)frame;
+        }
+
+        if (read_result == 0) {
+            break;
+        }
+
+        if (interrupt_from_user(frame)) {
+            if (user_copy_to(buffer_user + done, staging, (uint32_t)read_result) != 0) {
+                frame->eax = done != 0u ? done : (uint32_t)-1;
+                return (uint32_t)(uintptr_t)frame;
+            }
+        } else {
+            copy_bytes((void *)(uintptr_t)(buffer_user + done), staging, (uint32_t)read_result);
+        }
+
+        done += (uint32_t)read_result;
+        if ((uint32_t)read_result < chunk) {
+            break;
+        }
+    }
+
+    frame->eax = done;
+    return (uint32_t)(uintptr_t)frame;
+}
+
+uint32_t proc_sys_write(interrupt_frame_t *frame, uint32_t fd, uint32_t buffer_user, uint32_t length) {
+    char staging[PROC_IO_CHUNK];
+    const char *buffer = (const char *)(uintptr_t)buffer_user;
+    vfs_file_t *file;
+    uint32_t done = 0u;
+
+    if (current_task == 0 || buffer_user == 0u) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    if (length == 0u) {
+        frame->eax = 0u;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    file = proc_lookup_fd(current_task, fd);
+    if (file == 0) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    while (done < length) {
+        uint32_t chunk = length - done;
+        int32_t write_result;
+
+        if (chunk > sizeof(staging)) {
+            chunk = sizeof(staging);
+        }
+
+        if (interrupt_from_user(frame)) {
+            if (user_copy_from(staging, buffer_user + done, chunk) != 0) {
+                frame->eax = done != 0u ? done : (uint32_t)-1;
+                return (uint32_t)(uintptr_t)frame;
+            }
+        } else {
+            copy_bytes(staging, &buffer[done], chunk);
+        }
+
+        write_result = vfs_write_file(file, staging, chunk);
+        if (write_result == VFS_ERR_WOULD_BLOCK) {
+            if (done != 0u || !interrupt_from_user(frame)) {
+                frame->eax = done != 0u ? done : (uint32_t)-1;
+                return (uint32_t)(uintptr_t)frame;
+            }
+
+            current_task->block_reason = TASK_BLOCK_IO_WRITE;
+            current_task->blocked_fd = fd;
+            current_task->blocked_user_buffer = buffer_user;
+            current_task->blocked_length = length;
+            current_task->blocked_done = 0u;
+            current_task->state = TASK_BLOCKED;
+            return proc_schedule(frame);
+        }
+
+        if (write_result < 0) {
+            frame->eax = done != 0u ? done : (uint32_t)-1;
+            return (uint32_t)(uintptr_t)frame;
+        }
+
+        done += (uint32_t)write_result;
+        if ((uint32_t)write_result < chunk) {
+            break;
+        }
+    }
+
+    frame->eax = done;
+    return (uint32_t)(uintptr_t)frame;
+}
+
+uint32_t proc_sys_pipe(interrupt_frame_t *frame, uint32_t fds_user) {
+    int32_t fds[2];
+
+    if (current_task == 0 || fds_user == 0u) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    if (proc_pipe(fds) != 0) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    if (interrupt_from_user(frame)) {
+        if (user_copy_to(fds_user, fds, sizeof(fds)) != 0) {
+            (void)proc_close_fd((uint32_t)fds[0]);
+            (void)proc_close_fd((uint32_t)fds[1]);
+            frame->eax = (uint32_t)-1;
+            return (uint32_t)(uintptr_t)frame;
+        }
+    } else {
+        copy_bytes((void *)(uintptr_t)fds_user, fds, sizeof(fds));
+    }
+
+    frame->eax = 0u;
+    return (uint32_t)(uintptr_t)frame;
 }
 
 uint32_t proc_sys_exec(interrupt_frame_t *frame, uint32_t path_user) {
@@ -1243,6 +1817,7 @@ uint32_t proc_sys_execv(interrupt_frame_t *frame, uint32_t path_user, uint32_t a
     char arg_storage[EXEC_MAX_ARGS][EXEC_ARG_MAX];
     const char *argv[EXEC_MAX_ARGS];
     uint32_t argc = 0u;
+    vfs_credentials_t credentials;
     exec_image_t old_image;
     exec_image_t new_image;
     interrupt_user_frame_t *new_frame;
@@ -1263,6 +1838,12 @@ uint32_t proc_sys_execv(interrupt_frame_t *frame, uint32_t path_user, uint32_t a
 
     if (proc_normalize_path(current_task, path, absolute_path, sizeof(absolute_path)) != 0 ||
         proc_copy_exec_args(path_basename(absolute_path), argv_user, argv, arg_storage, &argc) != 0) {
+        frame->eax = (uint32_t)-1;
+        return (uint32_t)(uintptr_t)frame;
+    }
+
+    proc_fill_credentials(current_task, &credentials);
+    if (vfs_access_path(absolute_path, &credentials, VFS_ACCESS_EXEC) != 0) {
         frame->eax = (uint32_t)-1;
         return (uint32_t)(uintptr_t)frame;
     }
@@ -1347,6 +1928,11 @@ uint32_t proc_sys_fork(interrupt_frame_t *frame) {
     child->pid = next_pid++;
     child->parent_pid = current_task->pid;
     string_copy(child->cwd, current_task->cwd, sizeof(child->cwd));
+    child->uid = current_task->uid;
+    child->gid = current_task->gid;
+    child->session_id = current_task->session_id;
+    child->process_group_id = current_task->process_group_id;
+    string_copy(child->tty_name, current_task->tty_name, sizeof(child->tty_name));
     child->state = TASK_RUNNABLE;
 
     frame->eax = child->pid;

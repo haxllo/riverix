@@ -4,6 +4,24 @@
 #include <stdint.h>
 
 #define SYS_NAME_MAX 32u
+#define SYS_ERR_WOULD_BLOCK (-2)
+#define SYS_UID_ROOT 0u
+#define SYS_GID_ROOT 0u
+
+#define SYS_MODE_IXOTH 0x001u
+#define SYS_MODE_IWOTH 0x002u
+#define SYS_MODE_IROTH 0x004u
+#define SYS_MODE_IXGRP 0x008u
+#define SYS_MODE_IWGRP 0x010u
+#define SYS_MODE_IRGRP 0x020u
+#define SYS_MODE_IXUSR 0x040u
+#define SYS_MODE_IWUSR 0x080u
+#define SYS_MODE_IRUSR 0x100u
+#define SYS_MODE_ISVTX 0x200u
+#define SYS_MODE_FILE_DEFAULT 0644u
+#define SYS_MODE_EXEC_DEFAULT 0755u
+#define SYS_MODE_DIR_DEFAULT 0755u
+#define SYS_MODE_TMP_DEFAULT 01777u
 
 enum {
     SYS_WRITE = 1u,
@@ -31,6 +49,13 @@ enum {
     SYS_BOOTINFO = 23u,
     SYS_GETCWD = 24u,
     SYS_REINSTALL_ROOTFS = 25u,
+    SYS_GETUID = 26u,
+    SYS_GETGID = 27u,
+    SYS_SETUID = 28u,
+    SYS_SETGID = 29u,
+    SYS_SETSID = 30u,
+    SYS_GETTTY = 31u,
+    SYS_PIPE = 32u,
 };
 
 enum {
@@ -76,21 +101,34 @@ typedef struct sys_stat {
     uint32_t kind;
     uint32_t size;
     uint32_t child_count;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t links;
 } sys_stat_t;
 
 typedef struct sys_dirent {
     uint32_t kind;
     uint32_t size;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t links;
     char name[SYS_NAME_MAX];
 } sys_dirent_t;
 
 typedef struct sys_procinfo {
     uint32_t pid;
     uint32_t parent_pid;
+    uint32_t sid;
+    uint32_t pgid;
     uint32_t state;
     uint32_t kind;
     uint32_t run_ticks;
+    uint32_t uid;
+    uint32_t gid;
     char name[SYS_NAME_MAX];
+    char tty[SYS_NAME_MAX];
 } sys_procinfo_t;
 
 typedef struct sys_bootinfo {
