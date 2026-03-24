@@ -65,7 +65,9 @@ ROOTFS_START_SECTOR := 133120
 ROOTFS_SIZE_SECTORS := 32768
 ROOTFS_PARTITION_LABEL := riverix-rootfs
 ESP_LABEL := RIVERIX
-GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile serial terminal video efi_gop efi_uga gfxterm font
+GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile terminal
+GRUB_ISO_MODULES := iso9660 normal multiboot search search_fs_file configfile terminal
+GRUB_UILESS_ARGS := --fonts= --themes=
 INSTALL_GRUB_CONFIG ?= grub/grub-disk.cfg
 QEMU_AHCI_DISK_ARGS := -device ahci,id=ahci0 -drive id=disk0,if=none,format=raw,file=$(DISK_IMAGE) -device ide-hd,drive=disk0,bus=ahci0.0
 QEMU_NET_ARGS := -netdev user,id=net0 -device e1000,netdev=net0
@@ -250,7 +252,7 @@ $(ROOTFS_IMG): $(USER_ELFS) $(ROOTFS_STATIC_SOURCES) $(MKFS_ROOTFS) | $(BUILD_DI
 	$(MKFS_ROOTFS) $@ $(ROOTFS_SIZE_SECTORS) $(ROOTFS_ITEMS)
 
 $(GRUB_EFI): grub/grub-efi-early.cfg | $(BUILD_DIR)
-	$(GRUB_MKSTANDALONE) -O x86_64-efi -o $@ --modules="$(GRUB_EFI_MODULES)" --install-modules="$(GRUB_EFI_MODULES)" "boot/grub/grub.cfg=grub/grub-efi-early.cfg" >/dev/null
+	$(GRUB_MKSTANDALONE) -O x86_64-efi -o $@ $(GRUB_UILESS_ARGS) --modules="$(GRUB_EFI_MODULES)" --install-modules="$(GRUB_EFI_MODULES)" "boot/grub/grub.cfg=grub/grub-efi-early.cfg" >/dev/null
 
 $(DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk.cfg | $(BUILD_DIR)
 	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
@@ -280,7 +282,7 @@ $(ISO_DIR)/boot/grub/grub.cfg: grub/grub.cfg | $(ISO_DIR)/boot/grub
 	cp $< $@
 
 $(ISO): $(ISO_DIR)/boot/kernel.elf $(ISO_DIR)/boot/rootfs.img $(ISO_DIR)/boot/grub/grub.cfg
-	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) >/dev/null 2>&1
+	$(GRUB_MKRESCUE) $(GRUB_UILESS_ARGS) --modules="$(GRUB_ISO_MODULES)" --install-modules="$(GRUB_ISO_MODULES)" -o $@ $(ISO_DIR) >/dev/null 2>&1
 
 $(OVMF_VARS): | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
