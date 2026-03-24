@@ -36,6 +36,21 @@ static uint32_t page_table_index(uintptr_t virtual_address) {
     return (uint32_t)((virtual_address >> 12) & 0x3FFu);
 }
 
+static int paging_is_enabled(void) {
+    uint32_t cr0;
+
+    __asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
+    return (cr0 & 0x80000000u) != 0u;
+}
+
+static uintptr_t paging_phys_access_ptr(uint32_t physical_address) {
+    if (paging_is_enabled()) {
+        return paging_phys_to_virt(physical_address);
+    }
+
+    return (uintptr_t)physical_address;
+}
+
 static uint32_t *paging_directory_from_phys(uint32_t directory_phys) {
     return (uint32_t *)paging_phys_to_virt(directory_phys);
 }
@@ -55,7 +70,7 @@ static void copy_page_bytes(uint32_t destination_physical, uint32_t source_physi
 }
 
 static void zero_page(uint32_t physical_address) {
-    uint32_t *words = (uint32_t *)(uintptr_t)physical_address;
+    uint32_t *words = (uint32_t *)paging_phys_access_ptr(physical_address);
     uint32_t index;
 
     for (index = 0; index < PAGE_SIZE / sizeof(uint32_t); index++) {
@@ -130,7 +145,7 @@ void paging_init(void) {
         return;
     }
 
-    page_directory = (uint32_t *)(uintptr_t)kernel_page_directory_phys;
+    page_directory = (uint32_t *)paging_phys_access_ptr(kernel_page_directory_phys);
 
     zero_page(kernel_page_directory_phys);
 
@@ -146,7 +161,7 @@ void paging_init(void) {
         }
 
         zero_page(page_table_phys);
-        page_table = (uint32_t *)(uintptr_t)page_table_phys;
+        page_table = (uint32_t *)paging_phys_access_ptr(page_table_phys);
 
         for (entry_index = 0; entry_index < PAGE_TABLE_ENTRIES; entry_index++) {
             uint32_t physical_address = directory_offset + (entry_index * PAGE_SIZE);
