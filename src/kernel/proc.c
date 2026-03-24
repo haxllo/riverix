@@ -10,6 +10,7 @@
 #include "kernel/panic.h"
 #include "kernel/paging.h"
 #include "kernel/pit.h"
+#include "kernel/serial.h"
 #include "kernel/syscall.h"
 #include "kernel/trace.h"
 #include "kernel/usercopy.h"
@@ -1151,6 +1152,11 @@ void proc_init(void) {
 
 void proc_start_boot_tasks(void) {
     init_task = proc_create_user_task("/bin/init");
+    if (!serial_available()) {
+        console_write("sched: worker tasks disabled (no serial console)\n");
+        return;
+    }
+
     (void)proc_create_kernel_task("worker-a", worker_entry, "worker-a");
     (void)proc_create_kernel_task("worker-b", worker_entry, "worker-b");
 }
