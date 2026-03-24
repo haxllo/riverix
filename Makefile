@@ -65,8 +65,9 @@ ROOTFS_START_SECTOR := 133120
 ROOTFS_SIZE_SECTORS := 32768
 ROOTFS_PARTITION_LABEL := riverix-rootfs
 ESP_LABEL := RIVERIX
-GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile terminal
-GRUB_ISO_MODULES := iso9660 normal multiboot search search_fs_file configfile terminal
+GRUB_PARTITION_MODULES := part_acorn part_amiga part_apple part_bsd part_dfly part_dvh part_gpt part_msdos part_plan part_sun part_sunpc
+GRUB_EFI_MODULES := $(GRUB_PARTITION_MODULES) fat normal multiboot search search_fs_file configfile terminal efi_gop
+GRUB_ISO_MODULES := $(GRUB_PARTITION_MODULES) iso9660 normal multiboot search search_fs_file configfile terminal efi_gop
 GRUB_UILESS_ARGS := --fonts= --themes=
 INSTALL_GRUB_CONFIG ?= grub/grub-disk.cfg
 QEMU_AHCI_DISK_ARGS := -device ahci,id=ahci0 -drive id=disk0,if=none,format=raw,file=$(DISK_IMAGE) -device ide-hd,drive=disk0,bus=ahci0.0
