@@ -5,10 +5,10 @@
 #include "kernel/block.h"
 #include "kernel/bootinfo.h"
 #include "kernel/console.h"
+#include "kernel/input.h"
 #include "kernel/kheap.h"
 #include "kernel/partition.h"
 #include "kernel/ramdisk.h"
-#include "kernel/serial.h"
 #include "kernel/simplefs.h"
 #include "kernel/storage.h"
 #include "kernel/trace.h"
@@ -253,11 +253,9 @@ static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t lengt
     while (count < length) {
         char ch;
 
-        if (!serial_can_read()) {
+        if (!input_try_read_char(&ch)) {
             return count != 0u ? (int32_t)count : VFS_ERR_WOULD_BLOCK;
         }
-
-        ch = serial_read_char();
 
         if (ch == '\r') {
             ch = '\n';

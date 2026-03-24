@@ -92,6 +92,7 @@ OBJS := \
 	$(BUILD_DIR)/framebuffer.o \
 	$(BUILD_DIR)/gdt.o \
 	$(BUILD_DIR)/idt.o \
+	$(BUILD_DIR)/input.o \
 		$(BUILD_DIR)/interrupts.o \
 		$(BUILD_DIR)/kheap.o \
 		$(BUILD_DIR)/kstack.o \
@@ -104,6 +105,7 @@ OBJS := \
 	$(BUILD_DIR)/palloc.o \
 	$(BUILD_DIR)/paging.o \
 	$(BUILD_DIR)/pit.o \
+	$(BUILD_DIR)/platform.o \
 	$(BUILD_DIR)/partition.o \
 	$(BUILD_DIR)/proc.o \
 	$(BUILD_DIR)/ramdisk.o \
@@ -159,6 +161,9 @@ $(BUILD_DIR)/gdt.o: src/kernel/gdt.c | $(BUILD_DIR)
 $(BUILD_DIR)/idt.o: src/kernel/idt.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/input.o: src/kernel/input.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/interrupts.o: src/boot/interrupts.S | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
@@ -193,6 +198,9 @@ $(BUILD_DIR)/paging.o: src/kernel/paging.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/pit.o: src/kernel/pit.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/platform.o: src/kernel/platform.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/partition.o: src/kernel/partition.c | $(BUILD_DIR)
@@ -332,6 +340,7 @@ check: $(ISO) $(OVMF_VARS)
 	grep -q "palloc: free pages" $(LOG)
 	grep -q "paging: enabled" $(LOG)
 	grep -q "paging: high alias flags" $(LOG)
+	grep -q "input: ready backends 0x" $(LOG)
 	grep -q "kheap: ready base 0x" $(LOG)
 	grep -q "kheap: selftest ok" $(LOG)
 	grep -q "kstack: ready slots 0x" $(LOG)
@@ -414,6 +423,7 @@ check-disk: | $(BUILD_DIR)
 	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_LOG)
 	grep -q "memory: map complete" $(DISK_LOG)
+	grep -q "input: ready backends 0x" $(DISK_LOG)
 	grep -q "kheap: ready base 0x" $(DISK_LOG)
 	grep -q "kheap: selftest ok" $(DISK_LOG)
 	grep -q "kstack: ready slots 0x" $(DISK_LOG)
@@ -496,6 +506,7 @@ check-disk-ahci: | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) $(QEMU_AHCI_DISK_ARGS) $(QEMU_NET_ARGS) -serial file:$(DISK_AHCI_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_AHCI_LOG)
+	grep -q "input: ready backends 0x" $(DISK_AHCI_LOG)
 	grep -q "vfs: root policy disk" $(DISK_AHCI_LOG)
 	grep -q "pci: config io ready" $(DISK_AHCI_LOG)
 	grep -q "pci: found class 0x00010601" $(DISK_AHCI_LOG)
@@ -529,6 +540,7 @@ check-disk-recovery: | $(BUILD_DIR)
 	timeout $(CHECK_TIMEOUT) $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_RECOVERY_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_RECOVERY_LOG)
 	grep -q "memory: map complete" $(DISK_RECOVERY_LOG)
+	grep -q "input: ready backends 0x" $(DISK_RECOVERY_LOG)
 	grep -q "kheap: ready base 0x" $(DISK_RECOVERY_LOG)
 	grep -q "kheap: selftest ok" $(DISK_RECOVERY_LOG)
 	grep -q "kstack: ready slots 0x" $(DISK_RECOVERY_LOG)
@@ -678,6 +690,7 @@ check-soak: | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 	timeout 60s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(SOAK_DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_SOAK_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
 	grep -q "riverix: kernel_main reached" $(DISK_SOAK_LOG)
+	grep -q "input: ready backends 0x" $(DISK_SOAK_LOG)
 	grep -q "vfs: root policy disk" $(DISK_SOAK_LOG)
 	grep -q "storage: bootcount 0x00000001" $(DISK_SOAK_LOG)
 	grep -q "init: online" $(DISK_SOAK_LOG)

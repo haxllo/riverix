@@ -5,6 +5,7 @@
 #include "kernel/console.h"
 #include "kernel/exec.h"
 #include "kernel/gdt.h"
+#include "kernel/input.h"
 #include "kernel/kstack.h"
 #include "kernel/net.h"
 #include "kernel/panic.h"
@@ -1200,6 +1201,7 @@ uint32_t proc_schedule(interrupt_frame_t *frame) {
 
     pit_ensure_progress();
     proc_wake_sleepers();
+    input_poll();
     net_poll();
     proc_service_blocked_net();
     proc_service_blocked_io();

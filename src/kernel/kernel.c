@@ -5,6 +5,7 @@
 #include "kernel/framebuffer.h"
 #include "kernel/gdt.h"
 #include "kernel/idt.h"
+#include "kernel/input.h"
 #include "kernel/kheap.h"
 #include "kernel/kstack.h"
 #include "kernel/memory.h"
@@ -16,6 +17,7 @@
 #include "kernel/paging.h"
 #include "kernel/pic.h"
 #include "kernel/pit.h"
+#include "kernel/platform.h"
 #include "kernel/proc.h"
 #include "kernel/trace.h"
 #include "kernel/vfs.h"
@@ -30,6 +32,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
 
     console_init();
     trace_init();
+    platform_init();
 
     console_write("riverix: kernel_main reached\n");
     console_write("riverix: multiboot magic 0x");
@@ -93,6 +96,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     idt_init();
     pic_init();
     pit_init(100u);
+    input_init();
     (void)net_init();
     vfs_init(high_multiboot_info);
     (void)vfs_storage_selftest();

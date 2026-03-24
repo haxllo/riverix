@@ -16,6 +16,12 @@ remaps the PIC, starts the PIT timer, and handles timer interrupts in a verified
 round-robin kernel-thread scheduler with separate task stacks. A small `int 0x80` syscall
 layer now exposes `write`, `getpid`, and `yield`, and a minimal VFS/file-descriptor layer
 attaches `fd 0`, `fd 1`, and `fd 2` to a console device for each task. The kernel now
+also has a shared input subsystem behind `/dev/console`: console reads no longer poll
+COM1 directly, and instead consume characters from a backend-driven kernel queue that is
+currently fed by serial input plus an i8042 keyboard path. That is the long-term shape
+needed for later Hyper-V synthetic keyboard support, even though Hyper-V Gen2 local
+keyboard input itself still needs that platform-specific backend.
+The kernel now
 also loads user code/data segments plus a TSS, resolves `/bin/init`, validates and loads
 static ELF32 executables into private user address spaces, and launches ring-3 tasks
 through the same timer-preempted scheduler used by kernel workers. User tasks now support
@@ -112,6 +118,7 @@ VFS, process, network, panic, and trace boundaries.
 - Serial output remains the authoritative automated-check path in headless QEMU.
 - The kernel now has a framebuffer text-console path for UEFI graphics VMs, while serial
   and legacy VGA remain as fallbacks.
+- Console input is backend-driven instead of being hardwired to COM1.
 - Historical Unix documents are kept as references, not as imported implementation code.
 
 ## Prerequisites
