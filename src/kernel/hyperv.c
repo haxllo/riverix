@@ -12,6 +12,7 @@
 #define HV_X64_MSR_HYPERCALL 0x40000001u
 #define HV_X64_MSR_VP_INDEX 0x40000002u
 #define HV_X64_MSR_SCONTROL 0x40000080u
+#define HV_X64_MSR_SIEFP 0x40000082u
 #define HV_X64_MSR_SIMP 0x40000083u
 #define HV_X64_MSR_EOM 0x40000084u
 #define HV_X64_MSR_SINT2 0x40000092u
@@ -65,6 +66,17 @@ typedef struct {
 } __attribute__((packed)) hyperv_message_page_t;
 
 typedef struct {
+    volatile uint32_t pending;
+    volatile uint32_t armed;
+} __attribute__((packed)) hyperv_monitor_trigger_group_t;
+
+typedef struct {
+    uint32_t trigger_state;
+    uint32_t reserved0;
+    hyperv_monitor_trigger_group_t trigger_group[4];
+} __attribute__((packed)) hyperv_monitor_page_head_t;
+
+typedef struct {
     uint32_t connection_id;
     uint32_t reserved;
     uint32_t message_type;
@@ -97,6 +109,8 @@ static uint32_t hyperv_post_message_page_phys;
 static hyperv_input_post_message_t *hyperv_post_message_page_virt;
 static uint32_t hyperv_message_page_phys;
 static hyperv_message_page_t *hyperv_message_page_virt;
+static uint32_t hyperv_event_page_phys;
+static void *hyperv_event_page_virt;
 static uint32_t hyperv_monitor_page_phys[2];
 static uint64_t hyperv_guest_id_value;
 static int hyperv_guest_ready;
@@ -206,6 +220,7 @@ static int hyperv_setup_hypercall_page(void) {
 
 static int hyperv_setup_synic(void) {
     uint64_t simp;
+    uint64_t siefp;
     uint64_t scontrol;
     uint64_t sint;
 
@@ -221,6 +236,7 @@ static int hyperv_setup_synic(void) {
     }
 
     if (hyperv_allocate_page(&hyperv_message_page_phys, (void **)&hyperv_message_page_virt) != 0 ||
+        hyperv_allocate_page(&hyperv_event_page_phys, &hyperv_event_page_virt) != 0 ||
         hyperv_allocate_page(&hyperv_post_message_page_phys, (void **)&hyperv_post_message_page_virt) != 0 ||
         hyperv_allocate_page(&hyperv_monitor_page_phys[0], 0) != 0 ||
         hyperv_allocate_page(&hyperv_monitor_page_phys[1], 0) != 0) {
@@ -230,6 +246,9 @@ static int hyperv_setup_synic(void) {
 
     simp = ((uint64_t)hyperv_message_page_phys & HV_X64_MSR_HYPERCALL_PAGE_MASK) | HV_SYNIC_SIMP_ENABLE;
     cpu_wrmsr(HV_X64_MSR_SIMP, simp);
+
+    siefp = ((uint64_t)hyperv_event_page_phys & HV_X64_MSR_HYPERCALL_PAGE_MASK) | HV_SYNIC_SIMP_ENABLE;
+    cpu_wrmsr(HV_X64_MSR_SIEFP, siefp);
 
     sint = (uint64_t)HYPERV_MESSAGE_VECTOR & HV_SYNIC_SINT_VECTOR_MASK;
     sint |= HV_SYNIC_SINT_MASKED;
@@ -243,6 +262,8 @@ static int hyperv_setup_synic(void) {
 
     console_write("hyperv: synic msg page 0x");
     console_write_hex32(hyperv_message_page_phys);
+    console_write(" event page 0x");
+    console_write_hex32(hyperv_event_page_phys);
     console_write(" post page 0x");
     console_write_hex32(hyperv_post_message_page_phys);
     console_write(" sint 0x");
@@ -437,4 +458,24 @@ uint32_t hyperv_monitor_page(uint32_t page_index) {
     }
 
     return hyperv_monitor_page_phys[page_index];
+}
+
+void hyperv_set_monitor_pending(uint32_t page_index, uint32_t monitor_id) {
+    hyperv_monitor_page_head_t *page;
+    uint32_t group_index;
+    uint32_t bit_mask;
+
+    if (page_index >= 2u || monitor_id >= 128u) {
+        return;
+    }
+
+    page = (hyperv_monitor_page_head_t *)paging_phys_to_virt(hyperv_monitor_page_phys[page_index]);
+    if (page == 0) {
+        return;
+    }
+
+    group_index = monitor_id / 32u;
+    bit_mask = 1u << (monitor_id % 32u);
+    page->trigger_group[group_index].pending |= bit_mask;
+    compiler_barrier();
 }

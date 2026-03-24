@@ -9,6 +9,8 @@
 #include "kernel/palloc.h"
 
 #define VMBUS_MAKE_VERSION(major, minor) ((((uint32_t)(major)) << 16) | (uint32_t)(minor))
+#define VMBUS_VERSION_WIN10_V4_0 VMBUS_MAKE_VERSION(4u, 0u)
+#define VMBUS_VERSION_WIN10_V4_1 VMBUS_MAKE_VERSION(4u, 1u)
 #define VMBUS_VERSION_WIN10_V5_0 VMBUS_MAKE_VERSION(5u, 0u)
 #define VMBUS_VERSION_WIN10_V5_1 VMBUS_MAKE_VERSION(5u, 1u)
 #define VMBUS_VERSION_WIN10_V5_2 VMBUS_MAKE_VERSION(5u, 2u)
@@ -25,6 +27,9 @@
 #define VMBUS_RING_MIN_PAGES 2u
 #define VMBUS_PKT_TRAILER 8u
 #define VMBUS_GPADL_HANDLE_BASE 0x000E1E10u
+#define VMBUS_INTERRUPT_PAGE_BYTES PAGE_SIZE
+#define VMBUS_INTERRUPT_PAGE_HALF_BYTES (VMBUS_INTERRUPT_PAGE_BYTES / 2u)
+#define VMBUS_INTERRUPT_PAGE_HALF_BITS (VMBUS_INTERRUPT_PAGE_HALF_BYTES * 8u)
 
 #define CHANNELMSG_OFFERCHANNEL 1u
 #define CHANNELMSG_REQUESTOFFERS 3u
@@ -69,10 +74,15 @@ typedef struct {
     vmbus_channel_message_header_t header;
     uint32_t vmbus_version_requested;
     uint32_t target_vcpu;
-    uint8_t msg_sint;
-    uint8_t msg_vtl;
-    uint8_t reserved[2];
-    uint32_t feature_flags;
+    union {
+        uint64_t interrupt_page;
+        struct {
+            uint8_t msg_sint;
+            uint8_t msg_vtl;
+            uint8_t reserved[2];
+            uint32_t feature_flags;
+        } __attribute__((packed));
+    } __attribute__((packed));
     uint64_t monitor_page1;
     uint64_t monitor_page2;
 } __attribute__((packed)) vmbus_channel_initiate_contact_t;
@@ -146,6 +156,8 @@ static const uint32_t vmbus_supported_versions[] = {
     VMBUS_VERSION_WIN10_V5_2,
     VMBUS_VERSION_WIN10_V5_1,
     VMBUS_VERSION_WIN10_V5_0,
+    VMBUS_VERSION_WIN10_V4_1,
+    VMBUS_VERSION_WIN10_V4_0,
 };
 
 static const vmbus_guid_t vmbus_keyboard_guid_value = {
@@ -159,6 +171,8 @@ static uint32_t vmbus_connected;
 static uint32_t vmbus_protocol;
 static uint32_t vmbus_message_connection_id;
 static uint32_t vmbus_next_gpadl_handle;
+static uint32_t vmbus_interrupt_page_phys;
+static uint8_t *vmbus_interrupt_page_virt;
 static uint32_t vmbus_have_version_response;
 static uint32_t vmbus_have_gpadl_response;
 static uint32_t vmbus_have_open_response;
@@ -194,6 +208,17 @@ static uint32_t min_u32(uint32_t left, uint32_t right) {
 
 static uint32_t align_up_u32(uint32_t value, uint32_t alignment) {
     return (value + alignment - 1u) & ~(alignment - 1u);
+}
+
+static void vmbus_set_interrupt_bit(uint32_t relid) {
+    volatile uint8_t *send_page;
+
+    if (vmbus_interrupt_page_virt == 0 || relid >= VMBUS_INTERRUPT_PAGE_HALF_BITS) {
+        return;
+    }
+
+    send_page = (volatile uint8_t *)(vmbus_interrupt_page_virt + VMBUS_INTERRUPT_PAGE_HALF_BYTES);
+    send_page[relid >> 3] |= (uint8_t)(1u << (relid & 7u));
 }
 
 static int vmbus_guid_equal(const vmbus_guid_t *left, const vmbus_guid_t *right) {
@@ -317,6 +342,23 @@ static void vmbus_handle_offer(const vmbus_channel_offer_channel_t *offer) {
     console_write("\n");
 }
 
+static void vmbus_signal_channel(const vmbus_channel_t *channel) {
+    if (channel == 0) {
+        return;
+    }
+
+    vmbus_set_interrupt_bit(channel->child_relid);
+
+    if (channel->monitor_allocated != 0u) {
+        hyperv_set_monitor_pending(1u, channel->monitor_id);
+        return;
+    }
+
+    if (channel->signal_connection_id != 0u) {
+        (void)hyperv_signal_event(channel->signal_connection_id);
+    }
+}
+
 void vmbus_poll(void) {
     uint8_t message_buffer[VMBUS_MAX_MESSAGE_SIZE];
     uint32_t message_type;
@@ -397,6 +439,17 @@ void vmbus_init(void) {
     vmbus_next_gpadl_handle = VMBUS_GPADL_HANDLE_BASE;
     vmbus_keyboard_offer_valid = 0u;
 
+    if (vmbus_interrupt_page_virt == 0) {
+        vmbus_interrupt_page_phys = palloc_alloc_page();
+        if (vmbus_interrupt_page_phys == 0u) {
+            console_write("vmbus: interrupt page alloc failed\n");
+            return;
+        }
+
+        vmbus_interrupt_page_virt = (uint8_t *)paging_phys_to_virt(vmbus_interrupt_page_phys);
+        zero_bytes(vmbus_interrupt_page_virt, VMBUS_INTERRUPT_PAGE_BYTES);
+    }
+
     for (index = 0u; index < (sizeof(vmbus_supported_versions) / sizeof(vmbus_supported_versions[0])); index++) {
         vmbus_channel_initiate_contact_t contact;
 
@@ -404,9 +457,14 @@ void vmbus_init(void) {
         contact.header.msgtype = CHANNELMSG_INITIATE_CONTACT;
         contact.vmbus_version_requested = vmbus_supported_versions[index];
         contact.target_vcpu = hyperv_vp_index();
-        contact.msg_sint = (uint8_t)HYPERV_VMBUS_SINT_INDEX;
-        contact.msg_vtl = 0u;
-        contact.feature_flags = 0u;
+        if (vmbus_supported_versions[index] >= VMBUS_VERSION_WIN10_V5_0) {
+            contact.msg_sint = (uint8_t)HYPERV_VMBUS_SINT_INDEX;
+            contact.msg_vtl = 0u;
+            contact.feature_flags = 0u;
+        } else {
+            contact.interrupt_page = vmbus_interrupt_page_phys;
+            vmbus_message_connection_id = VMBUS_MESSAGE_CONNECTION_ID;
+        }
         contact.monitor_page1 = hyperv_monitor_page(0u);
         contact.monitor_page2 = hyperv_monitor_page(1u);
 
@@ -454,6 +512,8 @@ void vmbus_init(void) {
     console_write_hex32(vmbus_protocol);
     console_write(" msg conn 0x");
     console_write_hex32(vmbus_message_connection_id);
+    console_write(" int page 0x");
+    console_write_hex32(vmbus_interrupt_page_phys);
     console_write("\n");
 
     if (vmbus_keyboard_offer_valid == 0u) {
@@ -598,6 +658,7 @@ int vmbus_send_inband(vmbus_channel_t *channel,
     uint8_t *ring_data;
     vmbus_packet_descriptor_t descriptor;
     uint32_t ring_size;
+    uint32_t old_write;
     uint32_t write_index;
     uint32_t packet_length;
     uint32_t aligned_packet_length;
@@ -628,6 +689,7 @@ int vmbus_send_inband(vmbus_channel_t *channel,
     descriptor.trans_id = request_id;
 
     write_index = ring->write_index;
+    old_write = write_index;
     vmbus_copy_to_ring(ring_data, ring_size, write_index, &descriptor, sizeof(descriptor));
     write_index = (write_index + sizeof(descriptor)) % ring_size;
     vmbus_copy_to_ring(ring_data, ring_size, write_index, payload, payload_size);
@@ -646,8 +708,8 @@ int vmbus_send_inband(vmbus_channel_t *channel,
     write_index = (write_index + sizeof(trailer)) % ring_size;
     ring->write_index = write_index;
 
-    if (channel->signal_connection_id != 0u) {
-        (void)hyperv_signal_event(channel->signal_connection_id);
+    if (old_write == ring->read_index) {
+        vmbus_signal_channel(channel);
     }
 
     return 0;
