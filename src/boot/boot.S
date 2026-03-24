@@ -16,9 +16,9 @@
 .long 0
 .long 0
 .long 0
-.long 1024
-.long 768
-.long 32
+.long 0
+.long 0
+.long 0
 
 .section .text
 .code32
