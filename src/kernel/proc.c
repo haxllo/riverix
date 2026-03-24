@@ -1072,7 +1072,11 @@ static void idle_entry(void *arg) {
     (void)sys_write(1u, "task: idle online\n", 18u);
 
     for (;;) {
-        __asm__ volatile ("hlt");
+        if (pit_hardware_tick_seen()) {
+            __asm__ volatile ("hlt");
+        } else {
+            (void)sys_yield();
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 void pit_init(uint32_t frequency_hz);
 void pit_handle_tick(void);
 void pit_ensure_progress(void);
+int pit_hardware_tick_seen(void);
 uint32_t pit_ticks(void);
 
 #endif

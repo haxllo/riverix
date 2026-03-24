@@ -56,6 +56,10 @@ void pit_ensure_progress(void) {
     tick_count++;
 }
 
+int pit_hardware_tick_seen(void) {
+    return hardware_tick_seen != 0u;
+}
+
 uint32_t pit_ticks(void) {
     return tick_count;
 }
