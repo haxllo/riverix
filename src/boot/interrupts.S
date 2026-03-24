@@ -94,6 +94,18 @@ ISR_NOERR 128
 
 IRQ 0, 32
 
+.global interrupt_resume
+.type interrupt_resume, @function
+interrupt_resume:
+    mov 4(%esp), %esp
+    pop %gs
+    pop %fs
+    pop %es
+    pop %ds
+    popa
+    add $8, %esp
+    iret
+
 interrupt_common:
     pusha
     push %ds

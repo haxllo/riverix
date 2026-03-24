@@ -12,6 +12,7 @@ typedef void (*task_entry_t)(void *arg);
 
 void proc_init(void);
 void proc_start_boot_tasks(void);
+void proc_enter_initial_task(void) __attribute__((noreturn));
 uint32_t proc_schedule(interrupt_frame_t *frame);
 uint32_t proc_current_pid(void);
 uint32_t proc_current_ticks(void);

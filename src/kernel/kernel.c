@@ -23,12 +23,6 @@
 extern uint8_t __kernel_start;
 extern uint8_t __kernel_end;
 
-static void idle(void) {
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
-}
-
 void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     const multiboot_info_t *multiboot_info = (const multiboot_info_t *)(uintptr_t)multiboot_info_addr;
     uint32_t probe_page = 0u;
@@ -104,9 +98,6 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     (void)vfs_storage_selftest();
     proc_init();
     proc_start_boot_tasks();
-    interrupts_enable();
-
-    console_write("riverix: next steps -> syscall/vfs growth, userland, install path\n");
-
-    idle();
+    console_write("riverix: entering userspace\n");
+    proc_enter_initial_task();
 }

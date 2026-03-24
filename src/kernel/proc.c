@@ -86,6 +86,7 @@ static uint32_t next_pid = 1u;
 static uint32_t last_logged_tick;
 
 static void task_bootstrap(void);
+extern void interrupt_resume(uint32_t frame_esp);
 
 static void task_reset_image(exec_image_t *image) {
     uint32_t index;
@@ -1078,6 +1079,7 @@ static void worker_entry(void *arg) {
     const char *name = (const char *)arg;
     uint32_t last_heartbeat_tick = 0u;
     uint32_t work_counter = 0u;
+    uint32_t spin_budget = 0u;
     uint32_t pid = sys_getpid();
 
     (void)sys_write(1u, "task: ", 6u);
@@ -1090,6 +1092,7 @@ static void worker_entry(void *arg) {
         uint32_t ticks = pit_ticks();
 
         work_counter++;
+        spin_budget++;
         if ((ticks - last_heartbeat_tick) >= 200u) {
             last_heartbeat_tick = ticks;
             (void)sys_write(1u, "task: ", 6u);
@@ -1097,6 +1100,10 @@ static void worker_entry(void *arg) {
             (void)sys_write(1u, " work 0x", 8u);
             write_hex32_to_fd(1u, work_counter);
             (void)sys_write(1u, "\n", 1u);
+            spin_budget = 0u;
+            (void)sys_yield();
+        } else if (spin_budget >= 0x40000u) {
+            spin_budget = 0u;
             (void)sys_yield();
         }
 
@@ -1148,6 +1155,27 @@ void proc_start_boot_tasks(void) {
     (void)proc_create_kernel_task("worker-b", worker_entry, "worker-b");
 }
 
+static void proc_activate_task(task_t *next_task) {
+    proc_log_switch(current_task, next_task);
+    current_task = next_task;
+    paging_switch_directory(current_task->page_directory_phys);
+    gdt_set_kernel_stack((uint32_t)current_task->kstack.stack_top);
+    current_task->state = TASK_RUNNING;
+    current_task->switches++;
+}
+
+void proc_enter_initial_task(void) {
+    task_t *next_task = proc_pick_next();
+
+    if (next_task == 0) {
+        panic("no initial task");
+    }
+
+    proc_activate_task(next_task);
+    interrupt_resume(current_task->saved_esp);
+    panic("initial task returned");
+}
+
 uint32_t proc_schedule(interrupt_frame_t *frame) {
     task_t *next_task;
 
@@ -1171,12 +1199,7 @@ uint32_t proc_schedule(interrupt_frame_t *frame) {
         return (uint32_t)(uintptr_t)frame;
     }
 
-    proc_log_switch(current_task, next_task);
-    current_task = next_task;
-    paging_switch_directory(current_task->page_directory_phys);
-    gdt_set_kernel_stack((uint32_t)current_task->kstack.stack_top);
-    current_task->state = TASK_RUNNING;
-    current_task->switches++;
+    proc_activate_task(next_task);
 
     return current_task->saved_esp;
 }
