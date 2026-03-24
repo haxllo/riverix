@@ -4,6 +4,7 @@
 #include "kernel/console.h"
 #include "kernel/framebuffer.h"
 #include "kernel/gdt.h"
+#include "kernel/hyperv.h"
 #include "kernel/idt.h"
 #include "kernel/input.h"
 #include "kernel/kheap.h"
@@ -89,6 +90,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     kstack_init();
     (void)kstack_selftest();
     mmio_init();
+    hyperv_init();
 
     bootinfo_init(high_multiboot_info);
     framebuffer_init(bootinfo_framebuffer());

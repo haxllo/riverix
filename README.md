@@ -21,6 +21,11 @@ COM1 directly, and instead consume characters from a backend-driven kernel queue
 currently fed by serial input plus an i8042 keyboard path. That is the long-term shape
 needed for later Hyper-V synthetic keyboard support, even though Hyper-V Gen2 local
 keyboard input itself still needs that platform-specific backend.
+The platform foundation now also includes explicit Hyper-V guest-state bring-up:
+Riverix detects Hyper-V as a platform class, registers a guest OS ID, and enables a
+hypercall page once paging is active. That guest-side core is in place so later
+Hyper-V synthetic devices can be added through a real transport layer instead of more
+console-specific hacks.
 The kernel now
 also loads user code/data segments plus a TSS, resolves `/bin/init`, validates and loads
 static ELF32 executables into private user address spaces, and launches ring-3 tasks
@@ -119,6 +124,7 @@ VFS, process, network, panic, and trace boundaries.
 - The kernel now has a framebuffer text-console path for UEFI graphics VMs, while serial
   and legacy VGA remain as fallbacks.
 - Console input is backend-driven instead of being hardwired to COM1.
+- Hyper-V guest registration and hypercall-page bring-up now exist as platform groundwork.
 - Historical Unix documents are kept as references, not as imported implementation code.
 
 ## Prerequisites

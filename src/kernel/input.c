@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "kernel/console.h"
+#include "kernel/hyperv.h"
 #include "kernel/io.h"
 #include "kernel/platform.h"
 #include "kernel/serial.h"
@@ -295,7 +296,11 @@ void input_init(void) {
     console_write("\n");
 
     if (platform_is_hyperv() && input_backends == 0u) {
-        console_write("input: hyper-v synthetic keyboard backend pending\n");
+        if (hyperv_hypercall_ready()) {
+            console_write("input: hyper-v transport ready, keyboard backend pending\n");
+        } else {
+            console_write("input: hyper-v synthetic keyboard backend pending\n");
+        }
     }
 }
 

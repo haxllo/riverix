@@ -85,12 +85,14 @@ OBJS := \
 	$(BUILD_DIR)/ahci.o \
 	$(BUILD_DIR)/ata.o \
 	$(BUILD_DIR)/bootinfo.o \
+	$(BUILD_DIR)/boot_hyperv.o \
 	$(BUILD_DIR)/kernel.o \
 	$(BUILD_DIR)/console.o \
 	$(BUILD_DIR)/e1000.o \
 	$(BUILD_DIR)/exec.o \
 	$(BUILD_DIR)/framebuffer.o \
 	$(BUILD_DIR)/gdt.o \
+	$(BUILD_DIR)/hyperv.o \
 	$(BUILD_DIR)/idt.o \
 	$(BUILD_DIR)/input.o \
 		$(BUILD_DIR)/interrupts.o \
@@ -128,6 +130,9 @@ $(BUILD_DIR):
 $(BUILD_DIR)/boot.o: src/boot/boot.S | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/boot_hyperv.o: src/boot/hyperv.S | $(BUILD_DIR)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/kernel.o: src/kernel/kernel.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -156,6 +161,9 @@ $(BUILD_DIR)/framebuffer.o: src/kernel/framebuffer.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/gdt.o: src/kernel/gdt.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/hyperv.o: src/kernel/hyperv.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/idt.o: src/kernel/idt.c | $(BUILD_DIR)

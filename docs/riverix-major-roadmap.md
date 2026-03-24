@@ -147,6 +147,7 @@ Already done:
 - framebuffer-backed text console through GRUB graphics handoff
 - shared backend-driven console input core
 - serial and i8042 keyboard backends feeding `/dev/console`
+- Hyper-V guest detection plus guest-ID and hypercall-page bring-up
 
 Still needed:
 
