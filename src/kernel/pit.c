@@ -15,6 +15,8 @@ enum {
 };
 
 static volatile uint32_t tick_count;
+static volatile uint32_t hardware_tick_seen;
+static uint32_t fallback_announced;
 
 void pit_init(uint32_t frequency_hz) {
     uint32_t divisor = PIT_BASE_FREQUENCY / frequency_hz;
@@ -31,6 +33,7 @@ void pit_init(uint32_t frequency_hz) {
 }
 
 void pit_handle_tick(void) {
+    hardware_tick_seen = 1u;
     tick_count++;
 
     if ((tick_count % 25u) == 0u) {
@@ -38,6 +41,19 @@ void pit_handle_tick(void) {
         console_write_hex32(tick_count);
         console_write("\n");
     }
+}
+
+void pit_ensure_progress(void) {
+    if (hardware_tick_seen != 0u) {
+        return;
+    }
+
+    if (fallback_announced == 0u) {
+        fallback_announced = 1u;
+        console_write("pit: synthetic fallback\n");
+    }
+
+    tick_count++;
 }
 
 uint32_t pit_ticks(void) {

@@ -1188,6 +1188,7 @@ uint32_t proc_schedule(interrupt_frame_t *frame) {
         }
     }
 
+    pit_ensure_progress();
     proc_wake_sleepers();
     net_poll();
     proc_service_blocked_net();
