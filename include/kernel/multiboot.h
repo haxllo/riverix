@@ -9,12 +9,17 @@
 #define MULTIBOOT_INFO_CMDLINE (1u << 2)
 #define MULTIBOOT_INFO_MODS (1u << 3)
 #define MULTIBOOT_INFO_MMAP (1u << 6)
+#define MULTIBOOT_INFO_FRAMEBUFFER (1u << 12)
 
 #define MULTIBOOT_MEMORY_AVAILABLE 1u
 #define MULTIBOOT_MEMORY_RESERVED 2u
 #define MULTIBOOT_MEMORY_ACPI_RECLAIMABLE 3u
 #define MULTIBOOT_MEMORY_NVS 4u
 #define MULTIBOOT_MEMORY_BADRAM 5u
+
+#define MULTIBOOT_FRAMEBUFFER_TYPE_INDEXED 0u
+#define MULTIBOOT_FRAMEBUFFER_TYPE_RGB 1u
+#define MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT 2u
 
 typedef struct multiboot_info {
     uint32_t flags;
@@ -38,7 +43,27 @@ typedef struct multiboot_info {
     uint16_t vbe_interface_seg;
     uint16_t vbe_interface_off;
     uint16_t vbe_interface_len;
-} multiboot_info_t;
+    uint64_t framebuffer_addr;
+    uint32_t framebuffer_pitch;
+    uint32_t framebuffer_width;
+    uint32_t framebuffer_height;
+    uint8_t framebuffer_bpp;
+    uint8_t framebuffer_type;
+    union {
+        struct {
+            uint32_t framebuffer_palette_addr;
+            uint16_t framebuffer_palette_num_colors;
+        } __attribute__((packed)) palette;
+        struct {
+            uint8_t framebuffer_red_field_position;
+            uint8_t framebuffer_red_mask_size;
+            uint8_t framebuffer_green_field_position;
+            uint8_t framebuffer_green_mask_size;
+            uint8_t framebuffer_blue_field_position;
+            uint8_t framebuffer_blue_mask_size;
+        } __attribute__((packed)) rgb;
+    } __attribute__((packed)) color_info;
+} __attribute__((packed)) multiboot_info_t;
 
 typedef struct multiboot_memory_map {
     uint32_t size;

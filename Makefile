@@ -65,7 +65,7 @@ ROOTFS_START_SECTOR := 133120
 ROOTFS_SIZE_SECTORS := 32768
 ROOTFS_PARTITION_LABEL := riverix-rootfs
 ESP_LABEL := RIVERIX
-GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile serial terminal
+GRUB_EFI_MODULES := part_gpt fat normal multiboot search search_fs_file configfile serial terminal video efi_gop efi_uga gfxterm font
 INSTALL_GRUB_CONFIG ?= grub/grub-disk.cfg
 QEMU_AHCI_DISK_ARGS := -device ahci,id=ahci0 -drive id=disk0,if=none,format=raw,file=$(DISK_IMAGE) -device ide-hd,drive=disk0,bus=ahci0.0
 QEMU_NET_ARGS := -netdev user,id=net0 -device e1000,netdev=net0
@@ -86,6 +86,7 @@ OBJS := \
 	$(BUILD_DIR)/console.o \
 	$(BUILD_DIR)/e1000.o \
 	$(BUILD_DIR)/exec.o \
+	$(BUILD_DIR)/framebuffer.o \
 	$(BUILD_DIR)/gdt.o \
 	$(BUILD_DIR)/idt.o \
 		$(BUILD_DIR)/interrupts.o \
@@ -144,6 +145,9 @@ $(BUILD_DIR)/bootinfo.o: src/kernel/bootinfo.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/exec.o: src/kernel/exec.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/framebuffer.o: src/kernel/framebuffer.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/gdt.o: src/kernel/gdt.c | $(BUILD_DIR)

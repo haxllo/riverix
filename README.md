@@ -8,19 +8,21 @@ not vendor historical AT&T Unix source into the kernel tree.
 ## Current state
 
 The repository currently boots a 32-bit Multiboot kernel under GRUB and QEMU, initializes
-serial and VGA console output, parses the Multiboot memory map, brings up a bitmap-backed
-physical page allocator, and enables paging with both identity mappings and a higher-half
-direct map at `0xC0000000`. It also installs a flat GDT, loads an IDT, remaps the PIC,
-starts the PIT timer, and handles timer interrupts in a verified round-robin kernel-thread
-scheduler with separate task stacks. A small `int 0x80` syscall layer now exposes `write`,
-`getpid`, and `yield`, and a minimal VFS/file-descriptor layer attaches `fd 0`, `fd 1`,
-and `fd 2` to a console device for each task. The kernel now also loads user code/data
-segments plus a TSS, resolves `/bin/init`, validates and loads static ELF32 executables
-into private user address spaces, and launches ring-3 tasks through the same
-timer-preempted scheduler used by kernel workers. User tasks now support a minimal but
-real Unix-like lifecycle: `fork` clones the current task into a fresh address space with
-shared file-description references, `exec` replaces the current image in-place, `exit`
-creates a zombie state, and `waitpid` blocks until a child exits and returns its status.
+serial and legacy VGA console output, then attaches a late framebuffer text console when
+GRUB hands off a usable graphics framebuffer, parses the Multiboot memory map, brings up
+a bitmap-backed physical page allocator, and enables paging with both identity mappings
+and a higher-half direct map at `0xC0000000`. It also installs a flat GDT, loads an IDT,
+remaps the PIC, starts the PIT timer, and handles timer interrupts in a verified
+round-robin kernel-thread scheduler with separate task stacks. A small `int 0x80` syscall
+layer now exposes `write`, `getpid`, and `yield`, and a minimal VFS/file-descriptor layer
+attaches `fd 0`, `fd 1`, and `fd 2` to a console device for each task. The kernel now
+also loads user code/data segments plus a TSS, resolves `/bin/init`, validates and loads
+static ELF32 executables into private user address spaces, and launches ring-3 tasks
+through the same timer-preempted scheduler used by kernel workers. User tasks now support
+a minimal but real Unix-like lifecycle: `fork` clones the current task into a fresh
+address space with shared file-description references, `exec` replaces the current image
+in-place, `exit` creates a zombie state, and `waitpid` blocks until a child exits and
+returns its status.
 That `fork` path is now copy-on-write rather than eager-copy: writable user pages are
 shared read-only across parent and child until the first write fault or kernel writeback
 forces a private split. The shipped `/bin/init` program now proves three paths in sequence:
@@ -107,7 +109,9 @@ VFS, process, network, panic, and trace boundaries.
 
 - 32-bit x86 plus Multiboot keeps the early boot path understandable.
 - GRUB handles loader details so the repository can focus on kernel code.
-- Serial output makes automated checks possible in headless QEMU.
+- Serial output remains the authoritative automated-check path in headless QEMU.
+- The kernel now has a framebuffer text-console path for UEFI graphics VMs, while serial
+  and legacy VGA remain as fallbacks.
 - Historical Unix documents are kept as references, not as imported implementation code.
 
 ## Prerequisites
@@ -282,6 +286,7 @@ inside WSL.
 
 See `references/README.md` for the downloaded source material that guides the design.
 See `docs/plans/2026-03-16-riverix-system-roadmap.md` for the current end-to-end roadmap.
+See `docs/riverix-major-roadmap.md` for the post-roadmap major topics from the current VM-first Unix base to a production-grade desktop OS.
 See `docs/disk-layout.md` for the installed GPT/EFI layout and recovery boot flow.
 See `docs/plans/2026-03-16-phase-3-completion.md` for the Phase 3 completion breakdown.
 See `docs/plans/2026-03-18-phase-4-abi-growth.md` for the Phase 4 implementation plan.
@@ -296,7 +301,7 @@ See `docs/kernel-user-abi.md` for the current syscall contract.
 
 ## Near-term milestones
 
-1. Start Phase 10 with stronger panic/fault reporting, traces, and long-run verification instead of widening APIs again immediately.
-2. Keep the new networking path stable while strengthening the storage and process internals it depends on.
-3. Strengthen storage internals with better writeback discipline and recovery instead of the current write-through path.
+1. Make the framebuffer-backed console path work cleanly on more VMs before pushing toward real hardware.
+2. Replace `simplefs` with the planned ext2-like long-term Riverix filesystem.
+3. Strengthen storage internals with better writeback discipline and recovery on top of the replacement filesystem.
 4. Keep reducing hardcoded limits in kernel subsystems that still assume a very small userland.

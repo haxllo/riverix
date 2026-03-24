@@ -90,6 +90,7 @@ static void reserve_range(uint64_t start, uint64_t end) {
 
 static void reserve_boot_structures(const multiboot_info_t *multiboot_info) {
     const multiboot_module_t *modules;
+    uint64_t framebuffer_length;
     uint32_t index;
 
     reserve_range((uintptr_t)multiboot_info, (uintptr_t)multiboot_info + sizeof(*multiboot_info));
@@ -100,6 +101,16 @@ static void reserve_boot_structures(const multiboot_info_t *multiboot_info) {
 
     if ((multiboot_info->flags & MULTIBOOT_INFO_CMDLINE) != 0u && multiboot_info->cmdline != 0u) {
         reserve_range(multiboot_info->cmdline, multiboot_info->cmdline + 256u);
+    }
+
+    if ((multiboot_info->flags & MULTIBOOT_INFO_FRAMEBUFFER) != 0u &&
+        multiboot_info->framebuffer_addr != 0u &&
+        multiboot_info->framebuffer_pitch != 0u &&
+        multiboot_info->framebuffer_height != 0u) {
+        framebuffer_length = (uint64_t)multiboot_info->framebuffer_pitch *
+                             (uint64_t)multiboot_info->framebuffer_height;
+        reserve_range(multiboot_info->framebuffer_addr,
+                      multiboot_info->framebuffer_addr + framebuffer_length);
     }
 
     if ((multiboot_info->flags & MULTIBOOT_INFO_MODS) == 0u || multiboot_info->mods_count == 0u) {

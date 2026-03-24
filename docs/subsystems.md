@@ -9,6 +9,7 @@ stays readable as it grows.
 - `src/boot/boot.S`
 - `src/kernel/kernel.c`
 - `src/kernel/bootinfo.c`
+- `src/kernel/framebuffer.c`
 - `src/kernel/gdt.c`
 - `src/kernel/idt.c`
 - `src/kernel/pic.c`
@@ -19,7 +20,7 @@ stays readable as it grows.
 Responsibilities:
 
 - enter the kernel from Multiboot
-- initialize console, paging-adjacent early services, descriptor tables, and timer IRQs
+- initialize console, framebuffer handoff, paging-adjacent early services, descriptor tables, and timer IRQs
 - parse boot policy flags such as `root=disk`, `recovery=1`, `reinstall=1`, and `soak=1`
 - centralize fatal kernel halts through `panic()`
 - record structured trace events early enough that later subsystems can explain what happened
@@ -123,6 +124,7 @@ Responsibilities:
 ## Observability Contract
 
 - serial log lines remain the authoritative boot/test interface
+- framebuffer text output is the local on-screen console path when graphics handoff is available
 - trace records are the structured in-kernel interface for recent events
 - `/bin/trace` is the current user-facing trace inspector
 - `make check*` targets are the authoritative subsystem proofs
@@ -134,4 +136,4 @@ Responsibilities:
 - one fixed-size trace ring
 - one staged network path, not sockets
 - one teaching filesystem format
-- one supported interactive console path: serial `/dev/console`
+- one logical `/dev/console` path, backed by serial input plus serial/VGA/framebuffer output

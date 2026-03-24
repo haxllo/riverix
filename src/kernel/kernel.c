@@ -2,6 +2,7 @@
 
 #include "kernel/bootinfo.h"
 #include "kernel/console.h"
+#include "kernel/framebuffer.h"
 #include "kernel/gdt.h"
 #include "kernel/idt.h"
 #include "kernel/kheap.h"
@@ -93,6 +94,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     mmio_init();
 
     bootinfo_init(high_multiboot_info);
+    framebuffer_init(bootinfo_framebuffer());
     gdt_init();
     idt_init();
     pic_init();

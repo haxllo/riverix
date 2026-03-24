@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "kernel/framebuffer.h"
 #include "kernel/serial.h"
 #include "kernel/vga.h"
 
@@ -58,6 +59,7 @@ void console_write_len(const char *message, uint32_t length) {
     for (index = 0u; index < length; index++) {
         serial_write_char(message[index]);
         vga_write_char(message[index]);
+        framebuffer_write_char(message[index]);
     }
 
     console_irq_restore(flags);
