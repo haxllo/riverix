@@ -21,6 +21,7 @@
 #include "kernel/platform.h"
 #include "kernel/proc.h"
 #include "kernel/trace.h"
+#include "kernel/vmbus.h"
 #include "kernel/vfs.h"
 
 extern uint8_t __kernel_start;
@@ -94,6 +95,7 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
 
     bootinfo_init(high_multiboot_info);
     framebuffer_init(bootinfo_framebuffer());
+    vmbus_init();
     gdt_init();
     idt_init();
     pic_init();

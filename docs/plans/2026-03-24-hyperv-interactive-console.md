@@ -135,3 +135,10 @@
 
 - If keyboard works but mouse still does not, document that explicitly instead of implying otherwise.
 
+## Status
+
+- Layer A is implemented: Hyper-V guest detection, guest OS registration, hypercall-page setup, SynIC message-page setup, and narrow post-message/signal-event helpers now exist.
+- Layer B is implemented in a minimal poll-driven form: Riverix now negotiates VMBus, requests offers, discovers the keyboard offer, and opens a ring-backed channel without depending on synthetic interrupts.
+- Layer C is implemented: the Hyper-V synthetic keyboard protocol is negotiated and keyboard events are routed into the existing `/dev/console` input queue.
+- The existing QEMU automated matrix stays green after this work.
+- The remaining gate is manual Hyper-V Gen2 validation of local shell typing. Mouse/pointer support remains out of scope for this slice.

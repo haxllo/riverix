@@ -4,6 +4,7 @@
 
 #include "kernel/console.h"
 #include "kernel/hyperv.h"
+#include "kernel/hyperv_keyboard.h"
 #include "kernel/io.h"
 #include "kernel/platform.h"
 #include "kernel/serial.h"
@@ -52,6 +53,13 @@ static void input_queue_push_locked(char ch) {
     input_queue[input_queue_write_index] = ch;
     input_queue_write_index = (input_queue_write_index + 1u) % INPUT_QUEUE_CAPACITY;
     input_queue_buffered++;
+}
+
+void input_enqueue_char(char ch) {
+    uint32_t flags = input_irq_save();
+
+    input_queue_push_locked(ch);
+    input_irq_restore(flags);
 }
 
 static int input_queue_pop_locked(char *out_ch) {
@@ -180,11 +188,10 @@ static char i8042_translate_char(uint8_t scancode) {
     return base;
 }
 
-static void i8042_process_scancode(uint8_t scancode) {
+void input_process_xt_scancode(uint8_t scancode) {
     uint8_t code = scancode & (uint8_t)~I8042_RELEASE_MASK;
     int released = (scancode & I8042_RELEASE_MASK) != 0u;
     char ch;
-    uint32_t flags;
 
     if (scancode == I8042_PREFIX_E0 || scancode == I8042_PREFIX_E1) {
         i8042_extended_prefix = 1;
@@ -215,9 +222,7 @@ static void i8042_process_scancode(uint8_t scancode) {
         return;
     }
 
-    flags = input_irq_save();
-    input_queue_push_locked(ch);
-    input_irq_restore(flags);
+    input_enqueue_char(ch);
 }
 
 static void input_poll_serial(void) {
@@ -251,7 +256,7 @@ static void input_poll_i8042(void) {
             continue;
         }
 
-        i8042_process_scancode(inb(I8042_DATA_PORT));
+        input_process_xt_scancode(inb(I8042_DATA_PORT));
     }
 }
 
@@ -269,7 +274,7 @@ static void input_init_i8042(void) {
         uint8_t response = inb(I8042_DATA_PORT);
 
         if (response != I8042_KEYBOARD_ACK) {
-            i8042_process_scancode(response);
+            input_process_xt_scancode(response);
         }
     }
 
@@ -290,16 +295,19 @@ void input_init(void) {
     }
 
     input_init_i8042();
+    if (hyperv_keyboard_init() != 0) {
+        input_backends |= INPUT_BACKEND_HYPERV;
+    }
 
     console_write("input: ready backends 0x");
     console_write_hex32(input_backends);
     console_write("\n");
 
     if (platform_is_hyperv() && input_backends == 0u) {
-        if (hyperv_hypercall_ready()) {
-            console_write("input: hyper-v transport ready, keyboard backend pending\n");
+        if (hyperv_synic_ready()) {
+            console_write("input: hyper-v vmbus ready, keyboard backend pending\n");
         } else {
-            console_write("input: hyper-v synthetic keyboard backend pending\n");
+            console_write("input: hyper-v transport pending\n");
         }
     }
 }
@@ -307,6 +315,7 @@ void input_init(void) {
 void input_poll(void) {
     input_poll_serial();
     input_poll_i8042();
+    hyperv_keyboard_poll();
 }
 
 int input_try_read_char(char *out_ch) {

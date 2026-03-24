@@ -19,4 +19,16 @@ hyperv_hypercall_asm:
     pop %ebx
     ret
 
+.global hyperv_fast_hypercall8_asm
+.type hyperv_fast_hypercall8_asm, @function
+hyperv_fast_hypercall8_asm:
+    push %ebx
+    mov 12(%esp), %eax
+    mov 16(%esp), %edx
+    mov 20(%esp), %ecx
+    mov 24(%esp), %ebx
+    call *8(%esp)
+    pop %ebx
+    ret
+
 .section .note.GNU-stack,"",@progbits

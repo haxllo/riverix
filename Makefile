@@ -93,6 +93,7 @@ OBJS := \
 	$(BUILD_DIR)/framebuffer.o \
 	$(BUILD_DIR)/gdt.o \
 	$(BUILD_DIR)/hyperv.o \
+	$(BUILD_DIR)/hyperv_keyboard.o \
 	$(BUILD_DIR)/idt.o \
 	$(BUILD_DIR)/input.o \
 		$(BUILD_DIR)/interrupts.o \
@@ -117,6 +118,7 @@ OBJS := \
 	$(BUILD_DIR)/syscall.o \
 	$(BUILD_DIR)/trace.o \
 	$(BUILD_DIR)/usercopy.o \
+	$(BUILD_DIR)/vmbus.o \
 	$(BUILD_DIR)/vfs.o \
 	$(BUILD_DIR)/vga.o
 
@@ -164,6 +166,9 @@ $(BUILD_DIR)/gdt.o: src/kernel/gdt.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/hyperv.o: src/kernel/hyperv.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/hyperv_keyboard.o: src/kernel/hyperv_keyboard.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/idt.o: src/kernel/idt.c | $(BUILD_DIR)
@@ -233,6 +238,9 @@ $(BUILD_DIR)/trace.o: src/kernel/trace.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/usercopy.o: src/kernel/usercopy.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/vmbus.o: src/kernel/vmbus.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/vfs.o: src/kernel/vfs.c | $(BUILD_DIR)

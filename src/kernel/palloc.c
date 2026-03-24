@@ -202,6 +202,74 @@ uint32_t palloc_alloc_page(void) {
     return 0u;
 }
 
+uint32_t palloc_alloc_pages(uint32_t page_count) {
+    uint32_t frame;
+    uint32_t start;
+    uint32_t count;
+
+    if (page_count == 0u) {
+        return 0u;
+    }
+
+    if (page_count == 1u) {
+        return palloc_alloc_page();
+    }
+
+    if (page_count > first_unusable_frame || page_count > free_frames) {
+        return 0u;
+    }
+
+    if (first_unusable_frame >= page_count) {
+        for (start = next_search_frame; start <= (first_unusable_frame - page_count); start++) {
+            for (count = 0u; count < page_count; count++) {
+                frame = start + count;
+                if (frame_is_used(frame)) {
+                    start = frame;
+                    break;
+                }
+            }
+
+            if (count == page_count) {
+                for (count = 0u; count < page_count; count++) {
+                    frame = start + count;
+                    mark_frame_used(frame);
+                    frame_refcounts[frame] = 1u;
+                }
+
+                free_frames -= page_count;
+                next_search_frame = start + page_count;
+                return start * PAGE_SIZE;
+            }
+        }
+    }
+
+    if (next_search_frame >= page_count) {
+        for (start = 0u; start <= (next_search_frame - page_count); start++) {
+            for (count = 0u; count < page_count; count++) {
+                frame = start + count;
+                if (frame_is_used(frame)) {
+                    start = frame;
+                    break;
+                }
+            }
+
+            if (count == page_count) {
+                for (count = 0u; count < page_count; count++) {
+                    frame = start + count;
+                    mark_frame_used(frame);
+                    frame_refcounts[frame] = 1u;
+                }
+
+                free_frames -= page_count;
+                next_search_frame = start + page_count;
+                return start * PAGE_SIZE;
+            }
+        }
+    }
+
+    return 0u;
+}
+
 int palloc_retain_page(uint32_t physical_address) {
     uint32_t frame;
 
@@ -248,6 +316,18 @@ void palloc_free_page(uint32_t physical_address) {
 
     if (frame < next_search_frame) {
         next_search_frame = frame;
+    }
+}
+
+void palloc_free_pages_range(uint32_t physical_address, uint32_t page_count) {
+    uint32_t index;
+
+    if ((physical_address % PAGE_SIZE) != 0u) {
+        return;
+    }
+
+    for (index = 0u; index < page_count; index++) {
+        palloc_free_page(physical_address + (index * PAGE_SIZE));
     }
 }
 

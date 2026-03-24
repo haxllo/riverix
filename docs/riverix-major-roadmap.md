@@ -148,12 +148,13 @@ Already done:
 - shared backend-driven console input core
 - serial and i8042 keyboard backends feeding `/dev/console`
 - Hyper-V guest detection plus guest-ID and hypercall-page bring-up
+- Hyper-V SynIC message setup and a minimal poll-driven VMBus control path
+- Hyper-V Gen2 synthetic keyboard backend feeding the shared input queue
 
 Still needed:
 
-- broader VM validation and cleanup for the new framebuffer console path
+- final Hyper-V validation and cleanup for the new framebuffer/keyboard path
 - cleaner console abstraction instead of ad hoc serial + VGA + framebuffer fanout
-- Hyper-V Gen2 synthetic keyboard backend on top of the new input core
 - broader VM compatibility, especially Hyper-V class environments
 - later, real hardware display bring-up
 
