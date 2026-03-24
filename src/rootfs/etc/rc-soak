@@ -1,0 +1,20 @@
+# riverix phase 10 soak bootstrap
+echo phase10: soak script
+bootmode
+echo phase10: soak pwd begin
+pwd
+echo phase10: soak pwd end
+echo phase10: soak ps begin
+ps
+echo phase10: soak ps end
+echo phase10: soak pipe begin
+echo phase10-soak | cat
+echo phase10: soak pipe end
+tty
+id
+phase8
+netinfo
+ping 10.0.2.2
+phase10
+trace 12
+echo phase10: soak script done

@@ -21,6 +21,7 @@ echo phase9: net begin
 netinfo
 ping 10.0.2.2
 echo phase9: net end
+phase10
 mkdir /var/phase5-dir
 echo phase5-disk > /var/phase5-dir/note
 cat /var/phase5-dir/note

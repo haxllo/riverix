@@ -4,6 +4,7 @@
 
 #include "kernel/console.h"
 #include "kernel/paging.h"
+#include "kernel/trace.h"
 #include "shared/syscall_abi.h"
 
 static boot_root_policy_t root_policy_value = BOOT_ROOT_AUTO;
@@ -14,6 +15,7 @@ _Static_assert((uint32_t)BOOT_ROOT_DISK == SYS_BOOT_ROOT_DISK, "boot root disk A
 _Static_assert((uint32_t)BOOT_ROOT_RAMDISK == SYS_BOOT_ROOT_RAMDISK, "boot root ramdisk ABI mismatch");
 _Static_assert((uint32_t)BOOT_FLAG_RECOVERY == SYS_BOOT_FLAG_RECOVERY, "boot recovery flag ABI mismatch");
 _Static_assert((uint32_t)BOOT_FLAG_REINSTALL == SYS_BOOT_FLAG_REINSTALL, "boot reinstall flag ABI mismatch");
+_Static_assert((uint32_t)BOOT_FLAG_SOAK == SYS_BOOT_FLAG_SOAK, "boot soak flag ABI mismatch");
 
 static uint32_t string_length(const char *text) {
     uint32_t length = 0u;
@@ -80,6 +82,10 @@ void bootinfo_init(const multiboot_info_t *multiboot_info) {
         boot_flags_value |= BOOT_FLAG_REINSTALL;
     }
 
+    if (string_contains(cmdline, "soak=1")) {
+        boot_flags_value |= BOOT_FLAG_SOAK;
+    }
+
     console_write("boot: root ");
     console_write(bootinfo_root_policy_name(root_policy_value));
     if ((boot_flags_value & BOOT_FLAG_RECOVERY) != 0u) {
@@ -88,7 +94,16 @@ void bootinfo_init(const multiboot_info_t *multiboot_info) {
     if ((boot_flags_value & BOOT_FLAG_REINSTALL) != 0u) {
         console_write(" reinstall");
     }
+    if ((boot_flags_value & BOOT_FLAG_SOAK) != 0u) {
+        console_write(" soak");
+    }
     console_write("\n");
+
+    trace_log(SYS_TRACE_CATEGORY_BOOT,
+              SYS_TRACE_EVENT_BOOT_ROOT,
+              (uint32_t)root_policy_value,
+              boot_flags_value,
+              0u);
 }
 
 boot_root_policy_t bootinfo_root_policy(void) {
@@ -116,4 +131,8 @@ int bootinfo_recovery_enabled(void) {
 
 int bootinfo_reinstall_enabled(void) {
     return (boot_flags_value & BOOT_FLAG_REINSTALL) != 0u;
+}
+
+int bootinfo_soak_enabled(void) {
+    return (boot_flags_value & BOOT_FLAG_SOAK) != 0u;
 }

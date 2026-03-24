@@ -39,11 +39,13 @@ static int detect_writable_root(void) {
 
 int main(int argc, char **argv) {
     bootinfo_t info;
+    int have_bootinfo = 0;
     static const char *selftest_argv[] = { "selftest", 0 };
     static const char *ro_argv[] = { "sh", "/etc/rc-ro", 0 };
     static const char *disk_argv[] = { "sh", "/etc/rc-disk", 0 };
     static const char *recovery_argv[] = { "sh", "/etc/rc-recovery", 0 };
     static const char *reinstall_argv[] = { "sh", "/etc/rc-reinstall", 0 };
+    static const char *soak_argv[] = { "sh", "/etc/rc-soak", 0 };
     static const char *shell_argv[] = { "sh", 0 };
     const char *const *script_argv;
     int32_t status = 0;
@@ -52,6 +54,7 @@ int main(int argc, char **argv) {
     (void)argv;
 
     putstr_fd(1, "init: online\n");
+    have_bootinfo = getbootinfo(&info) == 0;
 
     if (run_program("/bin/selftest", selftest_argv, &status) < 0) {
         putstr_fd(2, "init: selftest launch failed\n");
@@ -63,7 +66,7 @@ int main(int argc, char **argv) {
         return status;
     }
 
-    if (getbootinfo(&info) == 0 && (info.flags & BOOT_FLAG_RECOVERY) != 0u) {
+    if (have_bootinfo && (info.flags & BOOT_FLAG_RECOVERY) != 0u) {
         putstr_fd(1, "init: recovery mode\n");
         if ((info.flags & BOOT_FLAG_REINSTALL) != 0u) {
             putstr_fd(1, "init: reinstall mode\n");
@@ -71,6 +74,9 @@ int main(int argc, char **argv) {
         } else {
             script_argv = recovery_argv;
         }
+    } else if (have_bootinfo && (info.flags & BOOT_FLAG_SOAK) != 0u) {
+        putstr_fd(1, "init: soak mode\n");
+        script_argv = soak_argv;
     } else {
         script_argv = detect_writable_root() ? disk_argv : ro_argv;
     }

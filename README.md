@@ -97,7 +97,11 @@ the kernel brings up a QEMU-first e1000 NIC through the existing PCI/MMIO path, 
 staged `netinfo`/`ping4` syscall ABI instead of pretending sockets already exist, applies a
 static guest IPv4 configuration (`10.0.2.15/24`, gateway `10.0.2.2`), and ships `/bin/netinfo`
 plus `/bin/ping` so the rc scripts can prove a real ARP + ICMP echo exchange on the ISO,
-disk, AHCI, and recovery paths.
+disk, AHCI, and recovery paths. Phase 10 is now in place too: the kernel has a central
+`panic()` path, a fixed-size structured trace ring with a user-visible trace ABI, a
+shipped `/bin/trace` inspector plus `/bin/phase10` proof binary, an explicit `soak=1`
+boot mode with `/etc/rc-soak`, and a subsystem map documenting the boot, VM, storage,
+VFS, process, network, panic, and trace boundaries.
 
 ## Why this shape
 
@@ -132,6 +136,7 @@ This produces:
 - `build/riverix.iso`
 - `build/riverix-disk.img` via `make disk-image`
 - `build/riverix-recovery-disk.img` via `make recovery-disk-image`
+- `build/riverix-soak-disk.img` via `make soak-disk-image`
 - `build/riverix-reinstall-disk.img` via `make reinstall-disk-image`
 
 ## Run
@@ -156,6 +161,12 @@ For the recovery-first disk image:
 
 ```bash
 make run-disk-recovery
+```
+
+For the soak disk image:
+
+```bash
+make run-disk-soak
 ```
 
 For the recovery-reinstall disk image:
@@ -198,6 +209,12 @@ To verify recovery reinstall resets the installed rootfs:
 
 ```bash
 make check-disk-reinstall
+```
+
+To verify the dedicated soak boot:
+
+```bash
+make check-soak
 ```
 
 To verify persistence across two boots:
@@ -246,6 +263,10 @@ has been reset.
 The `check-disk-persist` target rebuilds a fresh disk image, boots it twice, and confirms
 that the writable rootfs path persists the `/var/bootcount` update from the first boot to
 the second.
+
+The `check-soak` target boots a dedicated `soak=1` disk image, confirms that `/bin/init`
+selects `/etc/rc-soak`, requires the normal Phase 10 trace proof, and then checks three
+successful soak rounds plus a final trace dump before the shell handoff.
 
 ## WSL note
 

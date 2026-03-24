@@ -22,6 +22,7 @@ LOG := $(BUILD_DIR)/qemu.log
 DISK_LOG := $(BUILD_DIR)/qemu-disk.log
 DISK_AHCI_LOG := $(BUILD_DIR)/qemu-disk-ahci.log
 DISK_RECOVERY_LOG := $(BUILD_DIR)/qemu-disk-recovery.log
+DISK_SOAK_LOG := $(BUILD_DIR)/qemu-disk-soak.log
 DISK_REINSTALL_LOG1 := $(BUILD_DIR)/qemu-disk-reinstall-pass1.log
 DISK_REINSTALL_LOG2 := $(BUILD_DIR)/qemu-disk-reinstall-pass2.log
 DISK_REINSTALL_LOG3 := $(BUILD_DIR)/qemu-disk-reinstall-pass3.log
@@ -30,7 +31,7 @@ DISK_PERSIST_LOG2 := $(BUILD_DIR)/qemu-disk-pass2.log
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
 USER_LD_SCRIPT := src/user/user.ld
 USER_ASM_PROGRAMS := selftest child fault phase4
-USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps bootmode pwd reinstall id tty phase8 netinfo ping
+USER_C_PROGRAMS := init sh echo ls cat mkdir rm ps bootmode pwd reinstall id tty phase8 netinfo ping trace phase10
 USER_PROGRAMS := $(USER_ASM_PROGRAMS) $(USER_C_PROGRAMS)
 USER_ASM_OBJS := $(addprefix $(BUILD_DIR)/user_asm_,$(addsuffix .o,$(USER_ASM_PROGRAMS)))
 USER_C_OBJS := $(addprefix $(BUILD_DIR)/user_c_,$(addsuffix .o,$(USER_C_PROGRAMS)))
@@ -41,19 +42,21 @@ USER_RUNTIME_OBJS := \
 	$(BUILD_DIR)/user_libc_string.o \
 	$(BUILD_DIR)/user_libc_stdio.o
 ROOTFS_BIN_ITEMS := $(foreach program,$(USER_PROGRAMS),$(BUILD_DIR)/user_$(program).elf /bin/$(program))
-ROOTFS_STATIC_SOURCES := src/rootfs/etc/motd src/rootfs/etc/rc-ro src/rootfs/etc/rc-disk src/rootfs/etc/rc-recovery src/rootfs/etc/rc-reinstall
+ROOTFS_STATIC_SOURCES := src/rootfs/etc/motd src/rootfs/etc/rc-ro src/rootfs/etc/rc-disk src/rootfs/etc/rc-recovery src/rootfs/etc/rc-reinstall src/rootfs/etc/rc-soak
 ROOTFS_STATIC_ITEMS := \
 	src/rootfs/etc/motd /etc/motd \
 	src/rootfs/etc/rc-ro /etc/rc-ro \
 	src/rootfs/etc/rc-disk /etc/rc-disk \
 	src/rootfs/etc/rc-recovery /etc/rc-recovery \
-	src/rootfs/etc/rc-reinstall /etc/rc-reinstall
+	src/rootfs/etc/rc-reinstall /etc/rc-reinstall \
+	src/rootfs/etc/rc-soak /etc/rc-soak
 ROOTFS_ITEMS := $(ROOTFS_BIN_ITEMS) $(ROOTFS_STATIC_ITEMS)
 ROOTFS_IMG := $(BUILD_DIR)/rootfs.img
 MKFS_ROOTFS := $(BUILD_DIR)/mkfs_rootfs
 GRUB_EFI := $(BUILD_DIR)/BOOTX64.EFI
 DISK_IMAGE := $(BUILD_DIR)/riverix-disk.img
 RECOVERY_DISK_IMAGE := $(BUILD_DIR)/riverix-recovery-disk.img
+SOAK_DISK_IMAGE := $(BUILD_DIR)/riverix-soak-disk.img
 REINSTALL_DISK_IMAGE := $(BUILD_DIR)/riverix-reinstall-disk.img
 INSTALL_DISK_IMAGE := tools/install_disk_image.sh
 ESP_SIZE_KIB := 65536
@@ -91,6 +94,7 @@ OBJS := \
 	$(BUILD_DIR)/memory.o \
 	$(BUILD_DIR)/mmio.o \
 	$(BUILD_DIR)/net.o \
+	$(BUILD_DIR)/panic.o \
 	$(BUILD_DIR)/pci.o \
 	$(BUILD_DIR)/pic.o \
 	$(BUILD_DIR)/palloc.o \
@@ -103,11 +107,12 @@ OBJS := \
 	$(BUILD_DIR)/simplefs.o \
 	$(BUILD_DIR)/storage.o \
 	$(BUILD_DIR)/syscall.o \
+	$(BUILD_DIR)/trace.o \
 	$(BUILD_DIR)/usercopy.o \
 	$(BUILD_DIR)/vfs.o \
 	$(BUILD_DIR)/vga.o
 
-.PHONY: all clean run check disk-image recovery-disk-image reinstall-disk-image install-image run-disk run-disk-ahci run-disk-recovery run-disk-reinstall check-disk check-disk-ahci check-disk-recovery check-disk-reinstall check-disk-persist
+.PHONY: all clean run check disk-image recovery-disk-image soak-disk-image reinstall-disk-image install-image run-disk run-disk-ahci run-disk-recovery run-disk-reinstall run-disk-soak check-disk check-disk-ahci check-disk-recovery check-disk-reinstall check-disk-persist check-soak
 
 all: $(ISO)
 
@@ -165,6 +170,9 @@ $(BUILD_DIR)/mmio.o: src/kernel/mmio.c | $(BUILD_DIR)
 $(BUILD_DIR)/net.o: src/kernel/net.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/panic.o: src/kernel/panic.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/pci.o: src/kernel/pci.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -196,6 +204,9 @@ $(BUILD_DIR)/storage.o: src/kernel/storage.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/syscall.o: src/kernel/syscall.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/trace.o: src/kernel/trace.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/usercopy.o: src/kernel/usercopy.c | $(BUILD_DIR)
@@ -243,6 +254,9 @@ $(DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/gr
 $(RECOVERY_DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk-recovery.cfg | $(BUILD_DIR)
 	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk-recovery.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
 
+$(SOAK_DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk-soak.cfg | $(BUILD_DIR)
+	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk-soak.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
+
 $(REINSTALL_DISK_IMAGE): $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) grub/grub-disk-reinstall.cfg | $(BUILD_DIR)
 	SGDISK="$(SGDISK)" MKFS_VFAT="$(MKFS_VFAT)" MMD="$(MMD)" MCOPY="$(MCOPY)" DD="$(DD)" TRUNCATE="$(TRUNCATE)" $(INSTALL_DISK_IMAGE) --output "$@" --grub-config "grub/grub-disk-reinstall.cfg" --grub-efi "$(GRUB_EFI)" --kernel "$(KERNEL)" --rootfs "$(ROOTFS_IMG)" --esp-start-sector "$(ESP_START_SECTOR)" --esp-size-kib "$(ESP_SIZE_KIB)" --rootfs-start-sector "$(ROOTFS_START_SECTOR)" --rootfs-size-sectors "$(ROOTFS_SIZE_SECTORS)" --rootfs-partition-label "$(ROOTFS_PARTITION_LABEL)" --esp-label "$(ESP_LABEL)"
 
@@ -274,6 +288,8 @@ disk-image: $(DISK_IMAGE)
 
 recovery-disk-image: $(RECOVERY_DISK_IMAGE)
 
+soak-disk-image: $(SOAK_DISK_IMAGE)
+
 reinstall-disk-image: $(REINSTALL_DISK_IMAGE)
 
 install-image: $(INSTALL_DISK_IMAGE) $(GRUB_EFI) $(KERNEL) $(ROOTFS_IMG) $(INSTALL_GRUB_CONFIG)
@@ -291,6 +307,10 @@ run-disk-ahci: $(DISK_IMAGE) | $(BUILD_DIR)
 run-disk-recovery: $(RECOVERY_DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
 	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(RECOVERY_DISK_IMAGE) $(QEMU_NET_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
+
+run-disk-soak: $(SOAK_DISK_IMAGE) | $(BUILD_DIR)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	$(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(SOAK_DISK_IMAGE) $(QEMU_NET_ARGS) -serial stdio -monitor none -display none -no-reboot -no-shutdown
 
 run-disk-reinstall: $(REINSTALL_DISK_IMAGE) | $(BUILD_DIR)
 	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
@@ -365,6 +385,12 @@ check: $(ISO) $(OVMF_VARS)
 	grep -q "netinfo: ready mac" $(LOG)
 	grep -q "ping: ok 10.0.2.2" $(LOG)
 	grep -q "phase9: net end" $(LOG)
+	grep -q "phase10: trace begin" $(LOG)
+	grep -q "phase10: trace boot ok" $(LOG)
+	grep -q "phase10: trace proc ok" $(LOG)
+	grep -q "phase10: trace net ok" $(LOG)
+	grep -q "phase10: trace panic clear" $(LOG)
+	grep -q "phase10: trace end" $(LOG)
 	grep -q "phase5: ro done" $(LOG)
 	grep -q "init: rc exit 0x00000000" $(LOG)
 	grep -q "init: shell handoff" $(LOG)
@@ -442,6 +468,12 @@ check-disk: | $(BUILD_DIR)
 	grep -q "netinfo: ready mac" $(DISK_LOG)
 	grep -q "ping: ok 10.0.2.2" $(DISK_LOG)
 	grep -q "phase9: net end" $(DISK_LOG)
+	grep -q "phase10: trace begin" $(DISK_LOG)
+	grep -q "phase10: trace boot ok" $(DISK_LOG)
+	grep -q "phase10: trace proc ok" $(DISK_LOG)
+	grep -q "phase10: trace net ok" $(DISK_LOG)
+	grep -q "phase10: trace panic clear" $(DISK_LOG)
+	grep -q "phase10: trace end" $(DISK_LOG)
 	grep -q "phase5-disk" $(DISK_LOG)
 	grep -q "phase5: disk done" $(DISK_LOG)
 	grep -q "init: rc exit 0x00000000" $(DISK_LOG)
@@ -476,6 +508,8 @@ check-disk-ahci: | $(BUILD_DIR)
 	grep -q "netinfo: ready mac" $(DISK_AHCI_LOG)
 	grep -q "ping: ok 10.0.2.2" $(DISK_AHCI_LOG)
 	grep -q "phase9: net end" $(DISK_AHCI_LOG)
+	grep -q "phase10: trace begin" $(DISK_AHCI_LOG)
+	grep -q "phase10: trace end" $(DISK_AHCI_LOG)
 	grep -q "phase5: disk done" $(DISK_AHCI_LOG)
 	! grep -q "ata: detected ata0" $(DISK_AHCI_LOG)
 	@printf 'check passed: %s\n' "$(DISK_AHCI_LOG)"
@@ -531,6 +565,8 @@ check-disk-recovery: | $(BUILD_DIR)
 	grep -q "phase9: recovery net begin" $(DISK_RECOVERY_LOG)
 	grep -q "netinfo: ready mac" $(DISK_RECOVERY_LOG)
 	grep -q "phase9: recovery net end" $(DISK_RECOVERY_LOG)
+	grep -q "phase10: trace begin" $(DISK_RECOVERY_LOG)
+	grep -q "phase10: trace end" $(DISK_RECOVERY_LOG)
 	grep -q "phase6: recovery done" $(DISK_RECOVERY_LOG)
 	grep -q "init: rc exit 0x00000000" $(DISK_RECOVERY_LOG)
 	grep -q "init: shell handoff" $(DISK_RECOVERY_LOG)
@@ -564,6 +600,8 @@ check-disk-reinstall: | $(BUILD_DIR)
 	grep -q "phase8: tty /dev/console" $(DISK_REINSTALL_LOG2)
 	grep -q "phase8: setsid ok" $(DISK_REINSTALL_LOG2)
 	grep -q "phase8: writable skipped" $(DISK_REINSTALL_LOG2)
+	grep -q "phase10: trace begin" $(DISK_REINSTALL_LOG2)
+	grep -q "phase10: trace end" $(DISK_REINSTALL_LOG2)
 	grep -q "phase6: reinstall begin" $(DISK_REINSTALL_LOG2)
 	grep -q "reinstall: begin" $(DISK_REINSTALL_LOG2)
 	grep -q "recovery: reinstall begin blocks 0x" $(DISK_REINSTALL_LOG2)
@@ -600,6 +638,8 @@ check-disk-persist: | $(BUILD_DIR)
 	grep -q "init: selftest exit 0x00000000" $(DISK_PERSIST_LOG1)
 	grep -q "phase5: shell script disk" $(DISK_PERSIST_LOG1)
 	grep -q "phase8: tmp ok" $(DISK_PERSIST_LOG1)
+	grep -q "phase10: trace begin" $(DISK_PERSIST_LOG1)
+	grep -q "phase10: trace end" $(DISK_PERSIST_LOG1)
 	grep -q "phase5-disk" $(DISK_PERSIST_LOG1)
 	grep -q "phase5: disk done" $(DISK_PERSIST_LOG1)
 	grep -q "init: rc exit 0x00000000" $(DISK_PERSIST_LOG1)
@@ -617,10 +657,35 @@ check-disk-persist: | $(BUILD_DIR)
 	grep -q "init: selftest exit 0x00000000" $(DISK_PERSIST_LOG2)
 	grep -q "phase5: shell script disk" $(DISK_PERSIST_LOG2)
 	grep -q "phase8: tmp ok" $(DISK_PERSIST_LOG2)
+	grep -q "phase10: trace begin" $(DISK_PERSIST_LOG2)
+	grep -q "phase10: trace end" $(DISK_PERSIST_LOG2)
 	grep -q "phase5-disk" $(DISK_PERSIST_LOG2)
 	grep -q "phase5: disk done" $(DISK_PERSIST_LOG2)
 	grep -q "init: rc exit 0x00000000" $(DISK_PERSIST_LOG2)
 	@printf 'check passed: %s %s\n' "$(DISK_PERSIST_LOG1)" "$(DISK_PERSIST_LOG2)"
+
+check-soak: | $(BUILD_DIR)
+	rm -f $(SOAK_DISK_IMAGE)
+	$(MAKE) $(SOAK_DISK_IMAGE)
+	rm -f $(DISK_SOAK_LOG)
+	cp $(OVMF_VARS_TEMPLATE) $(OVMF_VARS)
+	timeout 60s $(QEMU) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=$(OVMF_VARS) -drive if=ide,format=raw,file=$(SOAK_DISK_IMAGE) $(QEMU_NET_ARGS) -serial file:$(DISK_SOAK_LOG) -monitor none -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true
+	grep -q "riverix: kernel_main reached" $(DISK_SOAK_LOG)
+	grep -q "vfs: root policy disk" $(DISK_SOAK_LOG)
+	grep -q "storage: bootcount 0x00000001" $(DISK_SOAK_LOG)
+	grep -q "init: online" $(DISK_SOAK_LOG)
+	grep -q "bootmode: root disk soak" $(DISK_SOAK_LOG)
+	grep -q "phase10: soak script" $(DISK_SOAK_LOG)
+	grep -q "phase10: trace begin" $(DISK_SOAK_LOG)
+	grep -q "phase10: soak begin" $(DISK_SOAK_LOG)
+	grep -q "phase10: soak round 0x00000001" $(DISK_SOAK_LOG)
+	grep -q "phase10: soak round 0x00000003" $(DISK_SOAK_LOG)
+	grep -q "phase10: soak done" $(DISK_SOAK_LOG)
+	grep -q "trace: count 0x" $(DISK_SOAK_LOG)
+	grep -q "ping: ok 10.0.2.2" $(DISK_SOAK_LOG)
+	grep -q "init: rc exit 0x00000000" $(DISK_SOAK_LOG)
+	grep -q "init: shell handoff" $(DISK_SOAK_LOG)
+	@printf 'check passed: %s\n' "$(DISK_SOAK_LOG)"
 
 clean:
 	rm -rf $(BUILD_DIR)

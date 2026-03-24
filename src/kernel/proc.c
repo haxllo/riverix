@@ -7,9 +7,11 @@
 #include "kernel/gdt.h"
 #include "kernel/kstack.h"
 #include "kernel/net.h"
+#include "kernel/panic.h"
 #include "kernel/paging.h"
 #include "kernel/pit.h"
 #include "kernel/syscall.h"
+#include "kernel/trace.h"
 #include "kernel/usercopy.h"
 #include "kernel/vfs.h"
 
@@ -904,6 +906,11 @@ static void proc_complete_blocked_ping(task_t *task, int32_t result) {
     frame = (interrupt_frame_t *)(uintptr_t)task->saved_esp;
     frame->eax = (uint32_t)result;
     task->block_reason = TASK_BLOCK_NONE;
+    trace_log(SYS_TRACE_CATEGORY_PROC,
+              SYS_TRACE_EVENT_PROC_PING_WAKE,
+              task->pid,
+              (uint32_t)result,
+              0u);
     if (task->state == TASK_BLOCKED) {
         task->state = TASK_RUNNABLE;
     }
@@ -1102,9 +1109,7 @@ static void task_bootstrap(void) {
 
     if (task == 0 || task->entry == 0) {
         console_write("sched: bootstrap has no current task\n");
-        for (;;) {
-            __asm__ volatile ("cli; hlt");
-        }
+        panic("bootstrap has no current task");
     }
 
     task->entry(task->arg);
@@ -1113,10 +1118,7 @@ static void task_bootstrap(void) {
     task->state = TASK_ZOMBIE;
     task->exit_status = -1;
     task->reap_ready = 1u;
-
-    for (;;) {
-        __asm__ volatile ("cli; hlt");
-    }
+    panic("kernel task returned");
 }
 
 void proc_init(void) {
@@ -1638,6 +1640,11 @@ uint32_t proc_sys_exit(interrupt_frame_t *frame, int32_t status) {
     task_clear_blocked_io(current_task);
     current_task->state = TASK_ZOMBIE;
     current_task->reap_ready = current_task->parent_pid == 0u ? 1u : 0u;
+    trace_log(SYS_TRACE_CATEGORY_PROC,
+              SYS_TRACE_EVENT_PROC_EXIT,
+              current_task->pid,
+              (uint32_t)status,
+              current_task->parent_pid);
 
     proc_notify_parent_exit(current_task);
 
@@ -1914,6 +1921,11 @@ uint32_t proc_sys_execv(interrupt_frame_t *frame, uint32_t path_user, uint32_t a
 
     paging_switch_directory(new_directory);
     gdt_set_kernel_stack((uint32_t)current_task->kstack.stack_top);
+    trace_log(SYS_TRACE_CATEGORY_PROC,
+              SYS_TRACE_EVENT_PROC_EXEC,
+              current_task->pid,
+              new_image.entry_point,
+              new_directory);
 
     exec_release_image(old_directory, &old_image);
     if (old_directory != 0u && old_directory != paging_page_directory_phys()) {
@@ -1980,6 +1992,11 @@ uint32_t proc_sys_fork(interrupt_frame_t *frame) {
     console_write("proc: fork child pid 0x");
     console_write_hex32(child->pid);
     console_write("\n");
+    trace_log(SYS_TRACE_CATEGORY_PROC,
+              SYS_TRACE_EVENT_PROC_FORK,
+              current_task->pid,
+              child->pid,
+              child->page_directory_phys);
 
     return (uint32_t)(uintptr_t)frame;
 }
@@ -2015,6 +2032,11 @@ uint32_t proc_sys_ping4(interrupt_frame_t *frame, uint32_t destination_ipv4, uin
         return (uint32_t)(uintptr_t)frame;
     }
 
+    trace_log(SYS_TRACE_CATEGORY_PROC,
+              SYS_TRACE_EVENT_PROC_PING_BLOCK,
+              current_task->pid,
+              destination_ipv4,
+              timeout_ticks);
     current_task->block_reason = TASK_BLOCK_NET_PING;
     current_task->state = TASK_BLOCKED;
     return proc_schedule(frame);

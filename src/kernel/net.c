@@ -5,6 +5,7 @@
 #include "kernel/console.h"
 #include "kernel/e1000.h"
 #include "kernel/pit.h"
+#include "kernel/trace.h"
 
 #define NET_ETH_TYPE_ARP 0x0806u
 #define NET_ETH_TYPE_IPV4 0x0800u
@@ -339,6 +340,11 @@ static void process_arp(const net_arp_packet_t *arp, uint32_t length) {
     sender_ipv4 = net_ntohl(arp->sender_ipv4_be);
     target_ipv4 = net_ntohl(arp->target_ipv4_be);
     arp_cache_store(sender_ipv4, arp->sender_mac);
+    trace_log(SYS_TRACE_CATEGORY_NET,
+              SYS_TRACE_EVENT_NET_ARP,
+              sender_ipv4,
+              target_ipv4,
+              opcode);
 
     if (net_state.ping.active != 0u &&
         net_state.ping.completed == 0u &&
@@ -378,6 +384,11 @@ static void process_icmp(const net_eth_header_t *eth,
         net_ntohl(ipv4->source_ipv4_be) == net_state.ping.destination_ipv4 &&
         identifier == net_state.ping.identifier &&
         sequence == net_state.ping.sequence) {
+        trace_log(SYS_TRACE_CATEGORY_NET,
+                  SYS_TRACE_EVENT_NET_PING_REPLY,
+                  net_state.ping.destination_ipv4,
+                  identifier,
+                  sequence);
         ping_complete(SYS_PING_OK);
         return;
     }
@@ -460,6 +471,11 @@ static void drive_ping(void) {
 
     now = pit_ticks();
     if ((int32_t)(now - net_state.ping.deadline_tick) >= 0) {
+        trace_log(SYS_TRACE_CATEGORY_NET,
+                  SYS_TRACE_EVENT_NET_PING_TIMEOUT,
+                  net_state.ping.destination_ipv4,
+                  net_state.ping.attempts,
+                  0u);
         ping_complete(SYS_PING_ERR_TIMEOUT);
         return;
     }
@@ -504,6 +520,11 @@ int32_t net_init(void) {
 
     net_state.ready = 1u;
     console_write("net: ready\n");
+    trace_log(SYS_TRACE_CATEGORY_NET,
+              SYS_TRACE_EVENT_NET_READY,
+              net_state.ipv4_addr,
+              net_state.ipv4_gateway,
+              0u);
     return 0;
 }
 
@@ -579,6 +600,11 @@ int32_t net_ping4_start(uint32_t requester_pid, uint32_t destination_ipv4, uint3
     net_state.ping.sequence = 1u;
     net_state.ping.stage = arp_cache_matches(net_state.ping.next_hop_ipv4) ? NET_PING_STAGE_ECHO : NET_PING_STAGE_ARP;
     net_state.ping.next_action_tick = 0u;
+    trace_log(SYS_TRACE_CATEGORY_NET,
+              SYS_TRACE_EVENT_NET_PING_START,
+              destination_ipv4,
+              net_state.ping.next_hop_ipv4,
+              timeout_ticks != 0u ? timeout_ticks : NET_PING_DEFAULT_TIMEOUT);
     drive_ping();
     return 0;
 }

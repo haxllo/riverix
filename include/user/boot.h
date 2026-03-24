@@ -13,6 +13,7 @@ typedef sys_bootinfo_t bootinfo_t;
 
 #define BOOT_FLAG_RECOVERY SYS_BOOT_FLAG_RECOVERY
 #define BOOT_FLAG_REINSTALL SYS_BOOT_FLAG_REINSTALL
+#define BOOT_FLAG_SOAK SYS_BOOT_FLAG_SOAK
 
 int32_t getbootinfo(bootinfo_t *info);
 int32_t reinstall_rootfs(void);

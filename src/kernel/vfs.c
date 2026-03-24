@@ -11,6 +11,7 @@
 #include "kernel/serial.h"
 #include "kernel/simplefs.h"
 #include "kernel/storage.h"
+#include "kernel/trace.h"
 
 static int32_t console_inode_read(vfs_file_t *file, void *buffer, uint32_t length);
 static int32_t console_inode_write(vfs_file_t *file, const char *buffer, uint32_t length);
@@ -637,6 +638,11 @@ static int32_t vfs_try_mount_disk_root(vfs_inode_t **out_root) {
     root_writable = rootfs_device->read_only == 0u ? 1u : 0u;
     root_device = rootfs_device;
     console_write("vfs: rootfs mounted from disk\n");
+    trace_log(SYS_TRACE_CATEGORY_BLOCK,
+              SYS_TRACE_EVENT_BLOCK_ROOTFS,
+              1u,
+              root_writable,
+              rootfs_device->block_count);
     return 0;
 }
 
@@ -662,6 +668,11 @@ static int32_t vfs_try_mount_ramdisk_root(const multiboot_info_t *multiboot_info
     root_writable = 0u;
     root_device = rootfs_device;
     console_write("vfs: rootfs mounted from ramdisk\n");
+    trace_log(SYS_TRACE_CATEGORY_BLOCK,
+              SYS_TRACE_EVENT_BLOCK_ROOTFS,
+              2u,
+              0u,
+              rootfs_device->block_count);
     return 0;
 }
 

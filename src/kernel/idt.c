@@ -5,11 +5,13 @@
 #include "kernel/console.h"
 #include "kernel/gdt.h"
 #include "kernel/kstack.h"
+#include "kernel/panic.h"
 #include "kernel/paging.h"
 #include "kernel/pic.h"
 #include "kernel/pit.h"
 #include "kernel/proc.h"
 #include "kernel/syscall.h"
+#include "kernel/trace.h"
 
 typedef struct idt_entry {
     uint16_t offset_low;
@@ -188,14 +190,17 @@ uint32_t interrupt_dispatch(interrupt_frame_t *frame) {
     }
 
     print_fault_details(frame);
+    trace_log(SYS_TRACE_CATEGORY_TRAP,
+              interrupt_from_user(frame) ? SYS_TRACE_EVENT_TRAP_USER : SYS_TRACE_EVENT_TRAP_KERNEL,
+              frame->int_no,
+              frame->err_code,
+              frame->eip);
 
     if (interrupt_from_user(frame)) {
         return proc_sys_exit(frame, (int32_t)(0x80u | (frame->int_no & 0x7Fu)));
     }
 
-    for (;;) {
-        __asm__ volatile ("cli; hlt");
-    }
+    panic("kernel trap");
 }
 
 void interrupts_enable(void) {

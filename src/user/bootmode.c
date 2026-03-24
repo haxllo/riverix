@@ -33,6 +33,9 @@ int main(int argc, char **argv) {
     if ((info.flags & BOOT_FLAG_REINSTALL) != 0u) {
         putstr_fd(1, " reinstall");
     }
+    if ((info.flags & BOOT_FLAG_SOAK) != 0u) {
+        putstr_fd(1, " soak");
+    }
     putstr_fd(1, "\n");
     return 0;
 }

@@ -1,7 +1,7 @@
 # Kernel/User ABI
 
-This document records the current Riverix syscall ABI as of the current Phase 9
-QEMU-first networking slice. The goal is
+This document records the current Riverix syscall ABI as of the current Phase 10
+robustness-and-observability slice. The goal is
 stability for the existing numbers and honest documentation of the current
 semantics and limits.
 
@@ -53,6 +53,8 @@ semantics and limits.
 | 32     | `pipe`   | `fds_ptr`                             | `0` or `-1` |
 | 33     | `netinfo` | `netinfo_ptr`                        | `0` or `-1` |
 | 34     | `ping4`  | `ipv4_addr`, `timeout_ticks`          | `0` on reply, negative staged error on failure |
+| 35     | `traceinfo` | `traceinfo_ptr`                    | `0` or `-1` |
+| 36     | `traceread` | `sequence`, `tracerecord_ptr`      | `0` on success, `1` if not present, `-1` on error |
 
 ## Flags and structs
 
@@ -162,6 +164,7 @@ Current boot flags:
 
 - `0x1`: recovery mode
 - `0x2`: scripted reinstall mode
+- `0x4`: soak mode
 
 ### `sys_netinfo_t`
 
@@ -190,6 +193,40 @@ Current staged `ping4` results:
 - `-3`: networking unavailable
 - `-4`: ping already in progress
 - `-5`: invalid request
+
+### `sys_trace_info_t`
+
+```c
+typedef struct sys_trace_info {
+    uint32_t capacity;
+    uint32_t count;
+    uint32_t next_sequence;
+} sys_trace_info_t;
+```
+
+### `sys_trace_record_t`
+
+```c
+typedef struct sys_trace_record {
+    uint32_t sequence;
+    uint32_t ticks;
+    uint32_t category;
+    uint32_t event;
+    uint32_t arg0;
+    uint32_t arg1;
+    uint32_t arg2;
+} sys_trace_record_t;
+```
+
+Current trace categories:
+
+- `1`: boot
+- `2`: memory
+- `3`: proc
+- `4`: block
+- `5`: net
+- `6`: trap
+- `7`: panic
 
 ### Mode bits
 
@@ -248,6 +285,11 @@ Current staged `ping4` results:
 - `reinstall_rootfs` is only intended to succeed while booted from recovery mode
   on the ramdisk rootfs. It rewrites the full installed `ata0p2` rootfs partition
   from the known-good `rootfs0` ramdisk block device.
+- `traceinfo` returns the capacity, current live record count, and next sequence id
+  for the kernel trace ring.
+- `traceread` returns one trace record by absolute sequence number. It returns `1`
+  when the requested record has already fallen out of the ring or has not been
+  produced yet.
 - `netinfo` exposes the current staged network state for the single supported
   QEMU-first e1000 path: readiness, MAC, static IPv4 config, one ARP cache entry,
   and simple RX/TX counters.
@@ -256,6 +298,8 @@ Current staged `ping4` results:
   reply or the timeout expires.
 - Riverix Phase 9 networking is currently static-config only:
   `10.0.2.15/24` with gateway `10.0.2.2` under QEMU user networking.
+- Riverix Phase 10 observability is still deliberately small: one fixed-size trace
+  ring, no dynamic subscriptions, and no binary log export beyond `traceread`.
 
 ## Proof coverage
 

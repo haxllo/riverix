@@ -6,6 +6,7 @@
 #include "user/net.h"
 #include "user/proc.h"
 #include "user/sys/stat.h"
+#include "user/trace.h"
 #include "user/unistd.h"
 
 int32_t write(int32_t fd, const void *buffer, uint32_t length) {
@@ -237,5 +238,19 @@ int32_t ping4(uint32_t ipv4_address, uint32_t timeout_ticks) {
     int32_t result;
 
     __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_PING4), "b"(ipv4_address), "c"(timeout_ticks) : "memory");
+    return result;
+}
+
+int32_t gettraceinfo(traceinfo_t *info) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_TRACEINFO), "b"(info) : "memory");
+    return result;
+}
+
+int32_t readtrace(uint32_t sequence, tracerecord_t *record) {
+    int32_t result;
+
+    __asm__ volatile ("int $0x80" : "=a"(result) : "a"(SYS_TRACEREAD), "b"(sequence), "c"(record) : "memory");
     return result;
 }

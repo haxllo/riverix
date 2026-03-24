@@ -6,6 +6,7 @@
 #include "kernel/idt.h"
 #include "kernel/net.h"
 #include "kernel/proc.h"
+#include "kernel/trace.h"
 #include "kernel/usercopy.h"
 #include "kernel/vfs.h"
 
@@ -143,6 +144,42 @@ static int32_t sys_netinfo_handler(const interrupt_frame_t *frame, uint32_t info
     }
 
     copy_bytes((void *)(uintptr_t)info_address, &info, sizeof(info));
+    return 0;
+}
+
+static int32_t sys_traceinfo_handler(const interrupt_frame_t *frame, uint32_t info_address) {
+    sys_trace_info_t info;
+
+    if (info_address == 0u || trace_get_info(&info) != 0) {
+        return -1;
+    }
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(info_address, &info, sizeof(info)) == 0 ? 0 : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)info_address, &info, sizeof(info));
+    return 0;
+}
+
+static int32_t sys_traceread_handler(const interrupt_frame_t *frame, uint32_t sequence, uint32_t record_address) {
+    sys_trace_record_t record;
+    int32_t result;
+
+    if (record_address == 0u) {
+        return -1;
+    }
+
+    result = trace_read(sequence, &record);
+    if (result != 0) {
+        return result;
+    }
+
+    if (interrupt_from_user(frame)) {
+        return user_copy_to(record_address, &record, sizeof(record)) == 0 ? 0 : -1;
+    }
+
+    copy_bytes((void *)(uintptr_t)record_address, &record, sizeof(record));
     return 0;
 }
 
@@ -300,6 +337,12 @@ uint32_t syscall_dispatch(interrupt_frame_t *frame) {
         return (uint32_t)(uintptr_t)frame;
     case SYS_PING4:
         return proc_sys_ping4(frame, frame->ebx, frame->ecx);
+    case SYS_TRACEINFO:
+        frame->eax = (uint32_t)sys_traceinfo_handler(frame, frame->ebx);
+        return (uint32_t)(uintptr_t)frame;
+    case SYS_TRACEREAD:
+        frame->eax = (uint32_t)sys_traceread_handler(frame, frame->ebx, frame->ecx);
+        return (uint32_t)(uintptr_t)frame;
     default:
         frame->eax = (uint32_t)-1;
         return (uint32_t)(uintptr_t)frame;

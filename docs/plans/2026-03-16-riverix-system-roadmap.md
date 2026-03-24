@@ -346,6 +346,10 @@ AHCI disk, and recovery paths.
 
 The system is small, understandable, and not one regression away from collapse.
 
+**Status:** Implemented on `main` with a central `panic()` path, a structured
+kernel trace ring plus `/bin/trace`, an explicit `soak=1` boot mode with
+`check-soak`, and a subsystem map documenting the stable architecture boundaries.
+
 ---
 
 ## Cross-Cutting Workstreams
@@ -358,15 +362,10 @@ These should happen continuously instead of being postponed to the end:
 - keep WSL-compatible build flows when practical
 - avoid adding subsystems that bypass VFS, block, or process abstractions
 
-## Suggested Immediate Execution Order
+## Roadmap State
 
-If we continue right now, the best order is:
-
-1. Start Phase 10 robustness work with stronger tracing, fault reporting, and long-run checks
-2. Keep the new networking path stable while growing observability instead of widening APIs too early
-3. Strengthen storage internals once the next wider userland slice starts leaning on them
-
-That order keeps the next critical path on a new subsystem while preserving the now-real local Unix environment.
+Phases 1 through 10 are now complete on `main`. Future work should be treated as
+post-roadmap tracks rather than unfinished baseline work.
 
 ## What Can Change Later
 

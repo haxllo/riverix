@@ -22,4 +22,5 @@ phase8
 echo phase9: recovery net begin
 netinfo
 echo phase9: recovery net end
+phase10
 echo phase6: recovery done

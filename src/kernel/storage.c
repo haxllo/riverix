@@ -6,6 +6,7 @@
 #include "kernel/ata.h"
 #include "kernel/console.h"
 #include "kernel/pci.h"
+#include "kernel/trace.h"
 
 static block_device_t *boot_disk;
 static const char *boot_partition_name;
@@ -44,6 +45,11 @@ int32_t storage_init(void) {
     console_write("storage: boot disk ");
     console_write(boot_disk->name);
     console_write("\n");
+    trace_log(SYS_TRACE_CATEGORY_BLOCK,
+              SYS_TRACE_EVENT_BLOCK_STORAGE,
+              boot_disk->controller != 0 ? boot_disk->controller->transport : 0u,
+              boot_disk->block_count,
+              0u);
     return 0;
 }
 

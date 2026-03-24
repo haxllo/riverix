@@ -10,6 +10,7 @@ echo phase8: pipe end
 tty
 id
 phase8
+phase10
 echo phase6: reinstall begin
 reinstall
 echo phase6: reinstall done

@@ -58,6 +58,8 @@ enum {
     SYS_PIPE = 32u,
     SYS_NETINFO = 33u,
     SYS_PING4 = 34u,
+    SYS_TRACEINFO = 35u,
+    SYS_TRACEREAD = 36u,
 };
 
 enum {
@@ -69,6 +71,37 @@ enum {
 enum {
     SYS_BOOT_FLAG_RECOVERY = 1u << 0,
     SYS_BOOT_FLAG_REINSTALL = 1u << 1,
+    SYS_BOOT_FLAG_SOAK = 1u << 2,
+};
+
+enum {
+    SYS_TRACE_CATEGORY_BOOT = 1u,
+    SYS_TRACE_CATEGORY_MEMORY = 2u,
+    SYS_TRACE_CATEGORY_PROC = 3u,
+    SYS_TRACE_CATEGORY_BLOCK = 4u,
+    SYS_TRACE_CATEGORY_NET = 5u,
+    SYS_TRACE_CATEGORY_TRAP = 6u,
+    SYS_TRACE_CATEGORY_PANIC = 7u,
+};
+
+enum {
+    SYS_TRACE_EVENT_BOOT_ROOT = 1u,
+    SYS_TRACE_EVENT_MEMORY_STATE = 2u,
+    SYS_TRACE_EVENT_PROC_FORK = 3u,
+    SYS_TRACE_EVENT_PROC_EXEC = 4u,
+    SYS_TRACE_EVENT_PROC_EXIT = 5u,
+    SYS_TRACE_EVENT_PROC_PING_BLOCK = 6u,
+    SYS_TRACE_EVENT_PROC_PING_WAKE = 7u,
+    SYS_TRACE_EVENT_BLOCK_STORAGE = 8u,
+    SYS_TRACE_EVENT_BLOCK_ROOTFS = 9u,
+    SYS_TRACE_EVENT_NET_READY = 10u,
+    SYS_TRACE_EVENT_NET_ARP = 11u,
+    SYS_TRACE_EVENT_NET_PING_START = 12u,
+    SYS_TRACE_EVENT_NET_PING_REPLY = 13u,
+    SYS_TRACE_EVENT_NET_PING_TIMEOUT = 14u,
+    SYS_TRACE_EVENT_TRAP_USER = 15u,
+    SYS_TRACE_EVENT_TRAP_KERNEL = 16u,
+    SYS_TRACE_EVENT_PANIC_FATAL = 17u,
 };
 
 enum {
@@ -159,5 +192,21 @@ typedef struct sys_netinfo {
     uint32_t rx_packets;
     uint32_t tx_packets;
 } sys_netinfo_t;
+
+typedef struct sys_trace_info {
+    uint32_t capacity;
+    uint32_t count;
+    uint32_t next_sequence;
+} sys_trace_info_t;
+
+typedef struct sys_trace_record {
+    uint32_t sequence;
+    uint32_t ticks;
+    uint32_t category;
+    uint32_t event;
+    uint32_t arg0;
+    uint32_t arg1;
+    uint32_t arg2;
+} sys_trace_record_t;
 
 #endif
